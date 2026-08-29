@@ -69,6 +69,7 @@ class LLMFactory:
                 provider_id=kwargs.get("provider_id"),
                 model=kwargs.get("model"),
                 agent=kwargs.get("agent"),
+                session_id=kwargs.get("session_id"),
                 workspace_directory=kwargs.get("workspace_directory"),
                 timeout=kwargs.get("timeout"),
                 keep_sessions=kwargs.get("keep_sessions"),
@@ -87,6 +88,8 @@ class LLMFactory:
                 executable=kwargs.get("executable"),
                 model=kwargs.get("model"),
                 provider=kwargs.get("provider"),
+                launch_mode=kwargs.get("launch_mode", "direct"),
+                session_id=kwargs.get("session_id", ""),
                 workspace_directory=kwargs.get("workspace_directory"),
                 timeout=kwargs.get("timeout"),
             )

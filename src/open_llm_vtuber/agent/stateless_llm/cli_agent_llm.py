@@ -2,8 +2,10 @@
 
 import asyncio
 import json
+import shutil
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List
+from uuid import uuid4
 
 from loguru import logger
 
@@ -19,15 +21,17 @@ class CLIAgentLLM(StatelessLLMInterface):
         executable: str,
         model: str = "",
         provider: str = "",
+        launch_mode: str = "direct",
+        session_id: str = "",
         workspace_directory: str = ".",
         timeout: float = 300,
     ):
         self.runtime = runtime
-        self.executable = (
-            str(Path(executable).expanduser()) if "/" in executable else executable
-        )
+        self.executable = self._resolve_executable(executable)
         self.model = model
         self.provider = provider
+        self.launch_mode = launch_mode
+        self.session_id = session_id
         self.workspace_directory = str(Path(workspace_directory).expanduser().resolve())
         self.timeout = timeout
         self.support_tools = False
@@ -41,7 +45,11 @@ class CLIAgentLLM(StatelessLLMInterface):
         if tools:
             logger.warning("{} does not forward VTuber tools", self.runtime)
 
-        prompt = self._build_prompt(messages, system)
+        prompt = (
+            self._latest_user_text(messages)
+            if self.session_id
+            else self._build_prompt(messages, system)
+        )
         command, stdin = self._command(prompt)
         process = None
 
@@ -67,7 +75,10 @@ class CLIAgentLLM(StatelessLLMInterface):
                     detail or f"process exited with status {process.returncode}"
                 )
 
-            response = self._response_text(stdout.decode("utf-8", errors="replace"))
+            output = stdout.decode("utf-8", errors="replace")
+            error_output = stderr.decode("utf-8", errors="replace")
+            response = self._response_text(output)
+            self._capture_session(output, error_output)
             if not response:
                 raise RuntimeError("the CLI returned an empty response")
             yield response.lstrip()
@@ -102,41 +113,71 @@ class CLIAgentLLM(StatelessLLMInterface):
                 "",
                 "--permission-mode",
                 "dontAsk",
-                "--no-session-persistence",
             ]
+            if self.session_id:
+                command.extend(["--resume", self.session_id])
+            else:
+                self.session_id = str(uuid4())
+                command.extend(["--session-id", self.session_id])
             if self.model:
                 command.extend(["--model", self.model])
             return command, prompt
 
         if self.runtime == "codex":
-            command = [
-                self.executable,
-                "exec",
-                "--json",
-                "--color",
-                "never",
-                "--sandbox",
-                "read-only",
-                "--skip-git-repo-check",
-                "--ephemeral",
-                "--ignore-rules",
-            ]
+            if self.session_id:
+                command = [
+                    self.executable,
+                    "exec",
+                    "resume",
+                    "--json",
+                    "--skip-git-repo-check",
+                    "--ignore-rules",
+                    "-c",
+                    'sandbox_mode="read-only"',
+                ]
+            else:
+                command = [
+                    self.executable,
+                    "exec",
+                    "--json",
+                    "--color",
+                    "never",
+                    "--sandbox",
+                    "read-only",
+                    "--skip-git-repo-check",
+                    "--ignore-rules",
+                ]
             if self.model:
                 command.extend(["--model", self.model])
+            if self.session_id:
+                command.append(self.session_id)
             command.append("-")
             return command, prompt
 
         if self.runtime == "hermes":
             command = [
                 self.executable,
-                "--oneshot",
+                "chat",
+                "--query",
                 prompt,
-                "--safe-mode",
+                "--quiet",
+                "--ignore-rules",
+                "--toolsets",
+                "",
+                "--reasoning",
+                "none",
+                "--source",
+                "tool",
+                "--max-turns",
+                "1",
             ]
+            if self.session_id:
+                command.extend(["--resume", self.session_id, "--no-restore-cwd"])
             if self.model:
                 command.extend(["--model", self.model])
-            if self.provider:
-                command.extend(["--provider", self.provider])
+            provider = "omlx" if self.launch_mode == "omlx" else self.provider
+            if provider:
+                command.extend(["--provider", provider])
             return command, None
 
         raise RuntimeError(f"unsupported CLI runtime: {self.runtime}")
@@ -169,6 +210,36 @@ class CLIAgentLLM(StatelessLLMInterface):
                     messages.append(text)
         return messages[-1].strip() if messages else ""
 
+    def _capture_session(self, output: str, error_output: str) -> None:
+        if self.runtime == "claude_code":
+            try:
+                session_id = json.loads(output).get("session_id")
+            except json.JSONDecodeError:
+                return
+            if isinstance(session_id, str) and session_id:
+                self.session_id = session_id
+            return
+
+        if self.runtime == "codex":
+            for line in output.splitlines():
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                session_id = event.get("thread_id")
+                if event.get("type") == "thread.started" and isinstance(
+                    session_id, str
+                ):
+                    self.session_id = session_id
+                    return
+            return
+
+        if self.runtime == "hermes":
+            for line in reversed(error_output.splitlines()):
+                if line.strip().lower().startswith("session_id:"):
+                    self.session_id = line.split(":", 1)[1].strip()
+                    return
+
     @staticmethod
     def _build_prompt(messages: List[Dict[str, Any]], system: str | None) -> str:
         transcript = [
@@ -184,6 +255,28 @@ class CLIAgentLLM(StatelessLLMInterface):
                 f"\n[{role}]\n{CLIAgentLLM._content_text(message.get('content', ''))}"
             )
         return "\n".join(transcript)
+
+    @staticmethod
+    def _latest_user_text(messages: List[Dict[str, Any]]) -> str:
+        for message in reversed(messages):
+            if message.get("role") == "user":
+                return CLIAgentLLM._content_text(message.get("content", ""))
+        if messages:
+            return CLIAgentLLM._content_text(messages[-1].get("content", ""))
+        return ""
+
+    def _resolve_executable(self, executable: str) -> str:
+        configured = str(executable or "auto").strip()
+        if configured not in {"", "auto"}:
+            expanded = str(Path(configured).expanduser())
+            return shutil.which(expanded) or expanded
+
+        command = {
+            "claude_code": "claude",
+            "codex": "codex",
+            "hermes": "hermes",
+        }.get(self.runtime, self.runtime)
+        return shutil.which(command) or command
 
     @staticmethod
     def _content_text(content: Any) -> str:

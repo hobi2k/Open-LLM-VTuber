@@ -151,7 +151,7 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
         self.server.server_close()
         self.thread.join(timeout=2)
 
-    async def test_streams_only_assistant_text_and_deletes_session(self):
+    async def test_streams_only_assistant_text_and_keeps_session(self):
         llm = self._llm()
         chunks = [
             chunk
@@ -196,7 +196,38 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(prompt_request["system"], "캐릭터 지시문")
         self.assertIn("[ASSISTANT]\n처음 답변", prompt_request["parts"][0]["text"])
         self.assertEqual(prompt_request["parts"][1]["mime"], "image/png")
-        self.assertIn(("DELETE", "/session/ses_test", None), OpenCodeHandler.requests)
+        self.assertNotIn(
+            ("DELETE", "/session/ses_test", None), OpenCodeHandler.requests
+        )
+
+    async def test_reuses_session_and_sends_only_latest_user_message(self):
+        llm = self._llm()
+        for _ in range(2):
+            chunks = [
+                chunk
+                async for chunk in llm.chat_completion(
+                    [
+                        {"role": "assistant", "content": "Previous answer"},
+                        {"role": "user", "content": "Latest question"},
+                    ],
+                    system="Character prompt",
+                )
+            ]
+            self.assertEqual("".join(chunks), "안녕하세요")
+
+        session_posts = [
+            request
+            for request in OpenCodeHandler.requests
+            if request[0] == "POST" and request[1] == "/session"
+        ]
+        self.assertEqual(len(session_posts), 1)
+        prompt_posts = [
+            body
+            for method, path, body in OpenCodeHandler.requests
+            if method == "POST" and path.endswith("/prompt_async")
+        ]
+        self.assertIn("[ASSISTANT]", prompt_posts[0]["parts"][0]["text"])
+        self.assertEqual(prompt_posts[1]["parts"][0]["text"], "Latest question")
 
     async def test_uses_final_text_when_provider_sends_no_deltas(self):
         OpenCodeHandler.use_deltas = False

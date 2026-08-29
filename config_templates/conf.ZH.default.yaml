@@ -122,6 +122,8 @@ character_config:
         provider_id: 'omlx' # OpenCode 中配置的提供商 ID
         model: 'Qwen3.8-27B-oQ4e-mtp' # OpenCode 中配置的模型 ID
         agent: 'vtuber'
+        launch_mode: 'direct'
+        session_id: ''
         workspace_directory: '.'
         timeout: 300
         keep_sessions: False # 设为 True 可在 OpenCode 中保留会话
@@ -133,6 +135,8 @@ character_config:
       # 已安装的代理 CLI。模型和提供商留空时使用各 CLI 的默认值。
       claude_code_llm:
         executable: 'claude'
+        launch_mode: 'direct'
+        session_id: ''
         model: ''
         provider: ''
         workspace_directory: '.'
@@ -141,6 +145,8 @@ character_config:
 
       codex_cli_llm:
         executable: 'codex'
+        launch_mode: 'direct'
+        session_id: ''
         model: ''
         provider: ''
         workspace_directory: '.'
@@ -149,6 +155,8 @@ character_config:
 
       hermes_cli_llm:
         executable: 'hermes'
+        launch_mode: 'direct'
+        session_id: ''
         model: ''
         provider: ''
         workspace_directory: '.'

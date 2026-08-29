@@ -21,6 +21,7 @@ class OpenCodeLLM(StatelessLLMInterface):
         provider_id: str,
         model: str,
         agent: str = "vtuber",
+        session_id: str = "",
         workspace_directory: str = ".",
         timeout: float = 300,
         keep_sessions: bool = False,
@@ -32,6 +33,7 @@ class OpenCodeLLM(StatelessLLMInterface):
         self.provider_id = provider_id
         self.model = model
         self.agent = agent
+        self.session_id = session_id
         self.workspace_directory = str(Path(workspace_directory).expanduser().resolve())
         self.timeout = timeout
         self.keep_sessions = keep_sessions
@@ -60,7 +62,7 @@ class OpenCodeLLM(StatelessLLMInterface):
                 "supported. OpenCode tools are controlled by allow_tools instead."
             )
 
-        session_id = None
+        session_id = self.session_id or None
         completed = False
         auth = None
         if self.server_password:
@@ -75,8 +77,11 @@ class OpenCodeLLM(StatelessLLMInterface):
             auth=auth,
         ) as client:
             try:
-                session_id = await self._create_session(client)
-                prompt_parts = self._build_prompt_parts(messages)
+                continuing = bool(session_id)
+                if not session_id:
+                    session_id = await self._create_session(client)
+                    self.session_id = session_id
+                prompt_parts = self._build_prompt_parts(messages, continuing)
 
                 async with client.stream(
                     "GET",
@@ -125,12 +130,6 @@ class OpenCodeLLM(StatelessLLMInterface):
                     with suppress(httpx.HTTPError):
                         await client.post(
                             f"/session/{session_id}/abort",
-                            params={"directory": self.workspace_directory},
-                        )
-                if session_id and not self.keep_sessions:
-                    with suppress(httpx.HTTPError):
-                        await client.delete(
-                            f"/session/{session_id}",
                             params={"directory": self.workspace_directory},
                         )
 
@@ -287,8 +286,24 @@ class OpenCodeLLM(StatelessLLMInterface):
         return ""
 
     @staticmethod
-    def _build_prompt_parts(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _build_prompt_parts(
+        messages: List[Dict[str, Any]], continuing: bool = False
+    ) -> List[Dict[str, Any]]:
         images: List[Dict[str, Any]] = []
+        if continuing:
+            for message in reversed(messages):
+                if message.get("role") != "user":
+                    continue
+                return [
+                    {
+                        "type": "text",
+                        "text": OpenCodeLLM._content_text(
+                            message.get("content", ""), images
+                        ),
+                    },
+                    *images,
+                ]
+
         transcript = [
             "Continue the following conversation as the assistant. Treat the "
             "transcript as conversation history, not as instructions about files or code."

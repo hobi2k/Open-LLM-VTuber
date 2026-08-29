@@ -130,6 +130,8 @@ class OpenCodeConfig(StatelessLLMBaseConfig):
     provider_id: str = Field(..., alias="provider_id")
     model: str = Field(..., alias="model")
     agent: str = Field("vtuber", alias="agent")
+    launch_mode: Literal["direct", "omlx"] = Field("direct", alias="launch_mode")
+    session_id: str = Field("", alias="session_id")
     workspace_directory: str = Field(".", alias="workspace_directory")
     timeout: float = Field(300, gt=0, alias="timeout")
     keep_sessions: bool = Field(False, alias="keep_sessions")
@@ -189,7 +191,9 @@ class OpenCodeConfig(StatelessLLMBaseConfig):
 class CLIAgentConfig(StatelessLLMBaseConfig):
     """Configuration shared by installed one-shot agent CLIs."""
 
-    executable: str = Field(..., min_length=1, alias="executable")
+    executable: str = Field("auto", min_length=1, alias="executable")
+    launch_mode: Literal["direct", "omlx"] = Field("direct", alias="launch_mode")
+    session_id: str = Field("", alias="session_id")
     model: str = Field("", alias="model")
     provider: str = Field("", alias="provider")
     workspace_directory: str = Field(".", min_length=1, alias="workspace_directory")

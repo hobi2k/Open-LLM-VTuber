@@ -1,6 +1,6 @@
 import ipaddress
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Literal
 
 import httpx
 import yaml
@@ -16,6 +16,8 @@ class OpenCodeSettingsUpdate(BaseModel):
     provider_id: str = Field(min_length=1)
     model: str = Field(min_length=1)
     agent: str = Field(default="vtuber", min_length=1)
+    launch_mode: Literal["direct", "omlx"] = "direct"
+    session_id: str = ""
     workspace_directory: str = Field(default=".", min_length=1)
     timeout: float = Field(default=300, gt=0)
     keep_sessions: bool = False
@@ -45,6 +47,8 @@ def settings_payload(context: ServiceContext) -> dict:
         "provider_id": config.provider_id,
         "model": config.model,
         "agent": config.agent,
+        "launch_mode": config.launch_mode,
+        "session_id": config.session_id,
         "workspace_directory": config.workspace_directory,
         "timeout": config.timeout,
         "keep_sessions": config.keep_sessions,
@@ -96,7 +100,9 @@ async def apply_opencode_settings(
         server_password=current.server_password,
     )
     contexts = [*client_contexts, default_context]
-    previous_engines = {id(context.agent_engine): context.agent_engine for context in contexts}
+    previous_engines = {
+        id(context.agent_engine): context.agent_engine for context in contexts
+    }
 
     for context in contexts:
         agent_config = context.character_config.agent_config.model_copy(deep=True)
@@ -108,7 +114,11 @@ async def apply_opencode_settings(
 
     active_engines = {id(context.agent_engine) for context in contexts}
     for engine_id, engine in previous_engines.items():
-        if engine_id in active_engines or engine is None or not hasattr(engine, "close"):
+        if (
+            engine_id in active_engines
+            or engine is None
+            or not hasattr(engine, "close")
+        ):
             continue
         await engine.close()
 

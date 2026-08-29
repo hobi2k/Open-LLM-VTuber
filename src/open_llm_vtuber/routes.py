@@ -32,6 +32,7 @@ from .agent_runtime_settings import (
     runtime_connection_payload,
     runtime_settings_payload,
 )
+from .agent_runtime_catalog import runtime_catalog_payload
 
 
 def init_client_ws_route(default_context_cache: ServiceContext) -> APIRouter:
@@ -107,6 +108,11 @@ def init_client_ws_route(default_context_cache: ServiceContext) -> APIRouter:
     ):
         require_local_request(request)
         return await runtime_connection_payload(default_context_cache, settings)
+
+    @router.get("/api/agent-runtime/catalog")
+    async def get_agent_runtime_catalog(request: Request):
+        require_local_request(request)
+        return await runtime_catalog_payload(default_context_cache)
 
     @router.websocket("/client-ws")
     async def websocket_endpoint(websocket: WebSocket):

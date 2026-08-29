@@ -123,6 +123,8 @@ character_config:
         provider_id: 'omlx' # Provider ID configured in OpenCode
         model: 'Qwen3.8-27B-oQ4e-mtp' # Model ID configured in OpenCode
         agent: 'vtuber'
+        launch_mode: 'direct'
+        session_id: ''
         workspace_directory: '.'
         timeout: 300
         keep_sessions: False # Set True to retain sessions in OpenCode
@@ -134,6 +136,8 @@ character_config:
       # Installed agent CLIs. Leave model/provider blank to use each CLI's default.
       claude_code_llm:
         executable: 'claude'
+        launch_mode: 'direct'
+        session_id: ''
         model: ''
         provider: ''
         workspace_directory: '.'
@@ -142,6 +146,8 @@ character_config:
 
       codex_cli_llm:
         executable: 'codex'
+        launch_mode: 'direct'
+        session_id: ''
         model: ''
         provider: ''
         workspace_directory: '.'
@@ -150,6 +156,8 @@ character_config:
 
       hermes_cli_llm:
         executable: 'hermes'
+        launch_mode: 'direct'
+        session_id: ''
         model: ''
         provider: ''
         workspace_directory: '.'
