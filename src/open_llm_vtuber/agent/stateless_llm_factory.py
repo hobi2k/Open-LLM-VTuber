@@ -9,6 +9,7 @@ from .stateless_llm.stateless_llm_with_template import (
 from .stateless_llm.openai_compatible_llm import AsyncLLM as OpenAICompatibleLLM
 from .stateless_llm.ollama_llm import OllamaLLM
 from .stateless_llm.claude_llm import AsyncLLM as ClaudeLLM
+from .stateless_llm.opencode_llm import OpenCodeLLM
 
 
 class LLMFactory:
@@ -59,6 +60,20 @@ class LLMFactory:
                 temperature=kwargs.get("temperature"),
                 keep_alive=kwargs.get("keep_alive"),
                 unload_at_exit=kwargs.get("unload_at_exit"),
+            )
+
+        if llm_provider == "opencode_llm":
+            return OpenCodeLLM(
+                base_url=kwargs.get("base_url"),
+                provider_id=kwargs.get("provider_id"),
+                model=kwargs.get("model"),
+                agent=kwargs.get("agent"),
+                workspace_directory=kwargs.get("workspace_directory"),
+                timeout=kwargs.get("timeout"),
+                keep_sessions=kwargs.get("keep_sessions"),
+                allow_tools=kwargs.get("allow_tools"),
+                server_username=kwargs.get("server_username"),
+                server_password=kwargs.get("server_password"),
             )
 
         elif llm_provider == "llama_cpp_llm":

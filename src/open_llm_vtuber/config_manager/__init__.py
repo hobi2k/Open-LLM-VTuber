@@ -12,6 +12,7 @@ from .character import CharacterConfig
 from .live import LiveConfig, BiliBiliLiveConfig
 from .stateless_llm import (
     OpenAICompatibleConfig,
+    OpenCodeConfig,
     ClaudeConfig,
     LlamaCppConfig,
 )
@@ -73,6 +74,7 @@ __all__ = [
     "BiliBiliLiveConfig",
     # LLM related classes
     "OpenAICompatibleConfig",
+    "OpenCodeConfig",
     "ClaudeConfig",
     "LlamaCppConfig",
     # Agent related classes

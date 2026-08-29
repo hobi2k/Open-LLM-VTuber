@@ -58,7 +58,7 @@ character_config:
         # 例如：
         # 'openai_compatible_llm', 'llama_cpp_llm', 'claude_llm', 'ollama_llm'
         # 'openai_llm', 'gemini_llm', 'zhipu_llm', 'deepseek_llm', 'groq_llm'
-        # 'mistral_llm', 'lmstudio_llm' 之类的
+        # 'mistral_llm', 'lmstudio_llm', 'opencode_llm' 之类的
         llm_provider: 'ollama_llm' # 使用的 LLM 提供商
         # 是否在第一句回应时遇上逗号就直接生成音频以减少首句延迟（默认：True）
         faster_first_response: True
@@ -114,6 +114,20 @@ character_config:
         # 用于表示中断信号的方法(提示词模式)。
         # 如果LLM支持在聊天记忆中的任何位置插入系统提示词，请使用'system'。
         # 否则，请使用'user'。您一般不需要更改此设置。
+
+      # OpenCode headless 服务器
+      opencode_llm:
+        base_url: 'http://127.0.0.1:4096'
+        provider_id: 'omlx' # OpenCode 中配置的提供商 ID
+        model: 'Qwen3.8-27B-oQ4e-mtp' # OpenCode 中配置的模型 ID
+        agent: 'vtuber'
+        workspace_directory: '.'
+        timeout: 300
+        keep_sessions: False # 设为 True 可在 OpenCode 中保留会话
+        allow_tools: False # 纯语音角色请保持 False
+        server_username: null
+        server_password: null
+        interrupt_method: 'user'
 
       # Claude API 配置
       claude_llm:

@@ -123,6 +123,69 @@ class OllamaConfig(OpenAICompatibleConfig):
     }
 
 
+class OpenCodeConfig(StatelessLLMBaseConfig):
+    """Configuration for an OpenCode headless server."""
+
+    base_url: str = Field("http://127.0.0.1:4096", alias="base_url")
+    provider_id: str = Field(..., alias="provider_id")
+    model: str = Field(..., alias="model")
+    agent: str = Field("vtuber", alias="agent")
+    workspace_directory: str = Field(".", alias="workspace_directory")
+    timeout: float = Field(300, gt=0, alias="timeout")
+    keep_sessions: bool = Field(False, alias="keep_sessions")
+    allow_tools: bool = Field(False, alias="allow_tools")
+    server_username: str | None = Field(None, alias="server_username")
+    server_password: str | None = Field(None, alias="server_password")
+
+    _OPENCODE_DESCRIPTIONS: ClassVar[dict[str, Description]] = {
+        "base_url": Description(
+            en="Base URL of the OpenCode headless server",
+            zh="OpenCode headless 服务器的基础 URL",
+        ),
+        "provider_id": Description(
+            en="Provider ID configured in OpenCode",
+            zh="OpenCode 中配置的模型提供商 ID",
+        ),
+        "model": Description(
+            en="Model ID configured for the selected OpenCode provider",
+            zh="所选 OpenCode 提供商中配置的模型 ID",
+        ),
+        "agent": Description(
+            en="OpenCode agent name used for conversations",
+            zh="用于对话的 OpenCode 智能体名称",
+        ),
+        "workspace_directory": Description(
+            en="Directory OpenCode uses as the conversation workspace",
+            zh="OpenCode 用作对话工作区的目录",
+        ),
+        "timeout": Description(
+            en="Maximum number of seconds to wait for a response",
+            zh="等待响应的最长秒数",
+        ),
+        "keep_sessions": Description(
+            en="Keep generated OpenCode sessions for debugging",
+            zh="保留生成的 OpenCode 会话以便调试",
+        ),
+        "allow_tools": Description(
+            en="Allow the selected OpenCode agent to use tools",
+            zh="允许所选 OpenCode 智能体使用工具",
+        ),
+        "server_username": Description(
+            en="Username for an authenticated OpenCode server",
+            zh="启用认证的 OpenCode 服务器用户名",
+        ),
+        "server_password": Description(
+            en="Password for an authenticated OpenCode server",
+            zh="启用认证的 OpenCode 服务器密码",
+        ),
+    }
+
+    DESCRIPTIONS: ClassVar[dict[str, Description]] = {
+        **StatelessLLMBaseConfig.DESCRIPTIONS,
+        **_OPENCODE_DESCRIPTIONS,
+    }
+
+
 class LmStudioConfig(OpenAICompatibleConfig):
     """Configuration for LM Studio."""
 
@@ -240,6 +303,7 @@ class StatelessLLMConfigs(I18nMixin, BaseModel):
         None, alias="openai_compatible_llm"
     )
     ollama_llm: OllamaConfig | None = Field(None, alias="ollama_llm")
+    opencode_llm: OpenCodeConfig | None = Field(None, alias="opencode_llm")
     lmstudio_llm: LmStudioConfig | None = Field(None, alias="lmstudio_llm")
     openai_llm: OpenAIConfig | None = Field(None, alias="openai_llm")
     gemini_llm: GeminiConfig | None = Field(None, alias="gemini_llm")
@@ -257,6 +321,10 @@ class StatelessLLMConfigs(I18nMixin, BaseModel):
         "openai_compatible_llm": Description(
             en="Configuration for OpenAI-compatible LLM providers",
             zh="OpenAI兼容的语言模型提供者配置",
+        ),
+        "opencode_llm": Description(
+            en="Configuration for an OpenCode headless server",
+            zh="OpenCode headless 服务器配置",
         ),
         "ollama_llm": Description(en="Configuration for Ollama", zh="Ollama 配置"),
         "lmstudio_llm": Description(
