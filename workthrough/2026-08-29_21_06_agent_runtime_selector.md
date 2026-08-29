@@ -9,7 +9,10 @@ OpenCode 전용 설정을 OpenCode, Claude Code, Codex, Hermes 공통 런타임 
 - 개발한 것: OpenCode와 Hermes의 Direct CLI/oMLX 실행 모드
 - 개발한 것: Claude Code, Codex, Hermes 연속 대화 세션 어댑터
 - 개발한 것: Electron 네이티브 프로젝트 폴더 선택기
+- 개발한 것: 영어·중국어와 동일한 범위를 갖는 일본어 UI 및 언어 선택
+- 개발한 것: 실행 파일·프로바이더·모델·프로젝트·세션을 목록에서 고르거나 직접 입력할 수 있는 편집형 선택기
 - 수정한 것: 연결 확인 시 저장하지 않은 런타임 선택과 입력값이 초기화되던 문제
+- 수정한 것: OpenCode 실행 파일이 서버 연결 상태와 별개로 자동 탐지·직접 경로 오류를 표시하도록 분리
 - 수정한 것: Hermes safe-mode가 사용자 oMLX 공급자 설정을 무시해 401을 내던 문제
 - 개선한 것: Claude 도구 비활성화, Codex 읽기 전용, Hermes 규칙·도구 비활성화
 - 개선한 것: OpenCode의 agent 입력을 의미가 분명한 OpenCode profile 고급 설정으로 정리
@@ -17,6 +20,7 @@ OpenCode 전용 설정을 OpenCode, Claude Code, Codex, Hermes 공통 런타임 
 - 개선한 것: 타임아웃 및 취소 시 CLI 자식 프로세스 정리
 - 개선한 것: Electron 44 업그레이드, 렌더러 샌드박스 활성화, Node 통합 비활성화
 - 개선한 것: 고유 앱 ID와 완전한 로컬 ad-hoc 번들 서명 적용
+- 개선한 것: OriginKit의 조밀한 도구형 구성을 참고해 설정 패널, 탭, 상태 표시, 세그먼트 컨트롤의 대비와 정보 밀도 정리
 
 ## 결과
 - 백엔드 테스트 20개 통과, Ruff 검사 및 포맷 통과
@@ -28,6 +32,10 @@ OpenCode 전용 설정을 OpenCode, Claude Code, Codex, Hermes 공통 런타임 
 - 웹 프로덕션 빌드, Electron 빌드, macOS arm64 앱 패키징 성공
 - 실제 설정 UI에서 네 런타임, Direct CLI/oMLX, 모델, 프로젝트, 세션 선택 검증
 - Electron 앱 실행 프로세스 유지와 패키지 렌더러의 Chromium 샌드박스 적용 확인
+- 일본어·영어·중국어 번역 키 일치, 변경 파일 ESLint 및 백엔드 집중 테스트 14개 통과
+- 네 CLI 자동 탐지, OpenCode 잘못된 직접 경로 오류, 사용자 지정 프로바이더·모델·세션·실행 파일 입력 확인
+- 일본어 브라우저 UI에서 OpenCode 기존 세션 선택, 네 런타임 전환, 취소 시 설정 미저장을 실제 조작으로 확인
+- 최신 웹 번들 및 macOS arm64 Electron 앱 재빌드 성공
 
 ## 다음 단계
 - 기존 Live2D SDK TypeScript 오류를 별도 정리

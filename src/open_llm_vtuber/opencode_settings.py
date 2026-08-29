@@ -1,4 +1,6 @@
+import asyncio
 import ipaddress
+import shutil
 from pathlib import Path
 from typing import Iterable, Literal
 
@@ -12,6 +14,7 @@ from .service_context import ServiceContext
 
 
 class OpenCodeSettingsUpdate(BaseModel):
+    executable: str = Field(default="auto", min_length=1)
     base_url: str = Field(min_length=1)
     provider_id: str = Field(min_length=1)
     model: str = Field(min_length=1)
@@ -43,6 +46,7 @@ def settings_payload(context: ServiceContext) -> dict:
     provider = context.character_config.agent_config.agent_settings.basic_memory_agent
     return {
         "enabled": provider.llm_provider == "opencode_llm",
+        "executable": config.executable,
         "base_url": config.base_url,
         "provider_id": config.provider_id,
         "model": config.model,
@@ -58,6 +62,7 @@ def settings_payload(context: ServiceContext) -> dict:
 
 
 async def connection_payload(config: OpenCodeConfig) -> dict:
+    executable = await opencode_executable_payload(config)
     auth = None
     if config.server_username and config.server_password:
         auth = (config.server_username, config.server_password)
@@ -76,11 +81,71 @@ async def connection_payload(config: OpenCodeConfig) -> dict:
             return {
                 "connected": payload.get("healthy") is True,
                 "version": payload.get("version"),
+                "path": executable["path"],
+                "executable_available": executable["available"],
+                "executable_version": executable["version"],
+                "executable_error": executable["error"],
                 "error": None,
             }
     except (httpx.HTTPError, ValueError) as error:
         return {
             "connected": False,
+            "version": None,
+            "path": executable["path"],
+            "executable_available": executable["available"],
+            "executable_version": executable["version"],
+            "executable_error": executable["error"],
+            "error": str(error),
+        }
+
+
+async def opencode_executable_payload(config: OpenCodeConfig) -> dict:
+    configured = str(config.executable or "auto").strip()
+    expanded = str(Path(configured).expanduser())
+    resolved = shutil.which("opencode") if configured in {"", "auto"} else None
+    if configured not in {"", "auto"}:
+        resolved = shutil.which(expanded)
+        if not resolved and Path(expanded).is_file():
+            resolved = expanded
+    if not resolved:
+        return {
+            "available": False,
+            "path": None,
+            "version": None,
+            "error": "Executable not found",
+        }
+
+    process = None
+    try:
+        process = await asyncio.create_subprocess_exec(
+            resolved,
+            "--version",
+            cwd=str(Path(config.workspace_directory).expanduser()),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        stdout, _ = await asyncio.wait_for(process.communicate(), timeout=5)
+        output = stdout.decode("utf-8", errors="replace").strip()
+        if process.returncode != 0:
+            return {
+                "available": False,
+                "path": resolved,
+                "version": None,
+                "error": output or "Version check failed",
+            }
+        return {
+            "available": True,
+            "path": resolved,
+            "version": output.splitlines()[0] if output else None,
+            "error": None,
+        }
+    except (OSError, asyncio.TimeoutError) as error:
+        if process and process.returncode is None:
+            process.kill()
+            await process.wait()
+        return {
+            "available": False,
+            "path": resolved,
             "version": None,
             "error": str(error),
         }

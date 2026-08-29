@@ -144,6 +144,7 @@ async def runtime_settings_payload(context: ServiceContext) -> dict:
     return {
         "provider": active,
         "opencode": {
+            "executable": opencode.executable,
             "base_url": opencode.base_url,
             "provider_id": opencode.provider_id,
             "model": opencode.model,

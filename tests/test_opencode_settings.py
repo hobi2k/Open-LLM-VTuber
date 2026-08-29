@@ -39,12 +39,14 @@ class OpenCodeSettingsTest(unittest.TestCase):
 
         self.assertNotIn("server_password", payload)
         self.assertTrue(payload["has_server_password"])
+        self.assertEqual(payload["executable"], "auto")
 
     def test_persists_provider_and_open_code_fields(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "conf.yaml"
             shutil.copyfile("conf.yaml", path)
             settings = OpenCodeSettingsUpdate(
+                executable="/tmp/custom-opencode",
                 base_url="http://127.0.0.1:4999",
                 provider_id="test-provider",
                 model="test-model",
@@ -66,6 +68,10 @@ class OpenCodeSettingsTest(unittest.TestCase):
             self.assertEqual(
                 agent_config["llm_configs"]["opencode_llm"]["model"],
                 "test-model",
+            )
+            self.assertEqual(
+                agent_config["llm_configs"]["opencode_llm"]["executable"],
+                "/tmp/custom-opencode",
             )
             validate_config(saved)
 

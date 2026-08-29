@@ -9,7 +9,7 @@ import httpx
 
 from .agent_runtime_settings import _cli_config, _cli_connection_payload
 from .config_manager.stateless_llm import OpenCodeConfig
-from .opencode_settings import get_opencode_config
+from .opencode_settings import get_opencode_config, opencode_executable_payload
 from .service_context import ServiceContext
 
 
@@ -22,6 +22,7 @@ async def runtime_catalog_payload(context: ServiceContext) -> dict:
         opencode_catalog,
         omlx,
         local,
+        opencode_status,
         claude_status,
         codex_status,
         hermes_status,
@@ -29,6 +30,7 @@ async def runtime_catalog_payload(context: ServiceContext) -> dict:
         _opencode_catalog(opencode),
         _omlx_catalog(),
         asyncio.to_thread(_local_catalog),
+        opencode_executable_payload(opencode),
         _cli_connection_payload(claude_code, "claude_code"),
         _cli_connection_payload(codex, "codex"),
         _cli_connection_payload(hermes, "hermes"),
@@ -50,6 +52,7 @@ async def runtime_catalog_payload(context: ServiceContext) -> dict:
     ]
     return {
         "executables": {
+            "opencode": opencode_status,
             "claude_code": claude_status,
             "codex": codex_status,
             "hermes": hermes_status,

@@ -259,6 +259,7 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(config.allow_tools)
         self.assertFalse(config.keep_sessions)
         self.assertEqual(config.agent, "vtuber")
+        self.assertEqual(config.executable, "auto")
 
     def _llm(self, allow_tools=False):
         return OpenCodeLLM(

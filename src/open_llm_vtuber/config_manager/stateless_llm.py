@@ -126,6 +126,7 @@ class OllamaConfig(OpenAICompatibleConfig):
 class OpenCodeConfig(StatelessLLMBaseConfig):
     """Configuration for an OpenCode headless server."""
 
+    executable: str = Field("auto", alias="executable")
     base_url: str = Field("http://127.0.0.1:4096", alias="base_url")
     provider_id: str = Field(..., alias="provider_id")
     model: str = Field(..., alias="model")
@@ -140,6 +141,10 @@ class OpenCodeConfig(StatelessLLMBaseConfig):
     server_password: str | None = Field(None, alias="server_password")
 
     _OPENCODE_DESCRIPTIONS: ClassVar[dict[str, Description]] = {
+        "executable": Description(
+            en="OpenCode executable path or 'auto' for PATH discovery",
+            zh="OpenCode 可执行文件路径，或使用 'auto' 从 PATH 自动查找",
+        ),
         "base_url": Description(
             en="Base URL of the OpenCode headless server",
             zh="OpenCode headless 服务器的基础 URL",

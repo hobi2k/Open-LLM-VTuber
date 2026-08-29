@@ -119,6 +119,7 @@ character_config:
 
       # OpenCode headless server
       opencode_llm:
+        executable: 'auto' # Auto-detect OpenCode, or enter a path
         base_url: 'http://127.0.0.1:4096'
         provider_id: 'omlx' # Provider ID configured in OpenCode
         model: 'Qwen3.8-27B-oQ4e-mtp' # Model ID configured in OpenCode

@@ -118,6 +118,7 @@ character_config:
 
       # OpenCode headless 服务器
       opencode_llm:
+        executable: 'auto' # 自动查找 OpenCode，也可填写路径
         base_url: 'http://127.0.0.1:4096'
         provider_id: 'omlx' # OpenCode 中配置的提供商 ID
         model: 'Qwen3.8-27B-oQ4e-mtp' # OpenCode 中配置的模型 ID
