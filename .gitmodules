@@ -1,4 +1,4 @@
 [submodule "frontend"]
 	path = frontend
-	url = https://github.com/Open-LLM-VTuber/Open-LLM-VTuber-Web
+	url = https://github.com/hobi2k/Open-LLM-VTuber-Web
 	branch = build

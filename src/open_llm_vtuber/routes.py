@@ -3,13 +3,29 @@ import json
 from uuid import uuid4
 import numpy as np
 from datetime import datetime
-from fastapi import APIRouter, WebSocket, UploadFile, File, Response
+from fastapi import (
+    APIRouter,
+    WebSocket,
+    UploadFile,
+    File,
+    Response,
+    Request,
+    HTTPException,
+)
 from starlette.responses import JSONResponse
 from starlette.websockets import WebSocketDisconnect
 from loguru import logger
 from .service_context import ServiceContext
 from .websocket_handler import WebSocketHandler
 from .proxy_handler import ProxyHandler
+from .opencode_settings import (
+    OpenCodeSettingsUpdate,
+    apply_opencode_settings,
+    connection_payload,
+    get_opencode_config,
+    require_loopback_client,
+    settings_payload,
+)
 
 
 def init_client_ws_route(default_context_cache: ServiceContext) -> APIRouter:
@@ -25,6 +41,40 @@ def init_client_ws_route(default_context_cache: ServiceContext) -> APIRouter:
 
     router = APIRouter()
     ws_handler = WebSocketHandler(default_context_cache)
+
+    def require_local_request(request: Request) -> None:
+        try:
+            require_loopback_client(request.client.host if request.client else None)
+        except (PermissionError, ValueError) as error:
+            raise HTTPException(status_code=403, detail=str(error)) from error
+
+    @router.get("/api/opencode/settings")
+    async def get_opencode_settings(request: Request):
+        require_local_request(request)
+        return {
+            **settings_payload(default_context_cache),
+            "connection": await connection_payload(
+                get_opencode_config(default_context_cache)
+            ),
+        }
+
+    @router.put("/api/opencode/settings")
+    async def update_opencode_settings(
+        request: Request,
+        settings: OpenCodeSettingsUpdate,
+    ):
+        require_local_request(request)
+        await apply_opencode_settings(
+            default_context_cache,
+            ws_handler.client_contexts.values(),
+            settings,
+        )
+        return {
+            **settings_payload(default_context_cache),
+            "connection": await connection_payload(
+                get_opencode_config(default_context_cache)
+            ),
+        }
 
     @router.websocket("/client-ws")
     async def websocket_endpoint(websocket: WebSocket):
