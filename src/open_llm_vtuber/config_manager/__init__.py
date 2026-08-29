@@ -13,6 +13,7 @@ from .live import LiveConfig, BiliBiliLiveConfig
 from .stateless_llm import (
     OpenAICompatibleConfig,
     OpenCodeConfig,
+    CLIAgentConfig,
     ClaudeConfig,
     LlamaCppConfig,
 )
@@ -75,6 +76,7 @@ __all__ = [
     # LLM related classes
     "OpenAICompatibleConfig",
     "OpenCodeConfig",
+    "CLIAgentConfig",
     "ClaudeConfig",
     "LlamaCppConfig",
     # Agent related classes

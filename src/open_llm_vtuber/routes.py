@@ -26,6 +26,12 @@ from .opencode_settings import (
     require_loopback_client,
     settings_payload,
 )
+from .agent_runtime_settings import (
+    AgentRuntimeSettingsUpdate,
+    apply_runtime_settings,
+    runtime_connection_payload,
+    runtime_settings_payload,
+)
 
 
 def init_client_ws_route(default_context_cache: ServiceContext) -> APIRouter:
@@ -75,6 +81,32 @@ def init_client_ws_route(default_context_cache: ServiceContext) -> APIRouter:
                 get_opencode_config(default_context_cache)
             ),
         }
+
+    @router.get("/api/agent-runtime/settings")
+    async def get_agent_runtime_settings(request: Request):
+        require_local_request(request)
+        return await runtime_settings_payload(default_context_cache)
+
+    @router.put("/api/agent-runtime/settings")
+    async def update_agent_runtime_settings(
+        request: Request,
+        settings: AgentRuntimeSettingsUpdate,
+    ):
+        require_local_request(request)
+        await apply_runtime_settings(
+            default_context_cache,
+            ws_handler.client_contexts.values(),
+            settings,
+        )
+        return await runtime_settings_payload(default_context_cache)
+
+    @router.post("/api/agent-runtime/check")
+    async def check_agent_runtime_settings(
+        request: Request,
+        settings: AgentRuntimeSettingsUpdate,
+    ):
+        require_local_request(request)
+        return await runtime_connection_payload(default_context_cache, settings)
 
     @router.websocket("/client-ws")
     async def websocket_endpoint(websocket: WebSocket):

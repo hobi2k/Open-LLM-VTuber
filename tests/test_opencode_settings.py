@@ -14,6 +14,11 @@ from open_llm_vtuber.opencode_settings import (
     require_loopback_client,
     settings_payload,
 )
+from open_llm_vtuber.agent_runtime_settings import (
+    AgentRuntimeSettingsUpdate,
+    CLISettingsUpdate,
+    persist_runtime_settings,
+)
 
 
 class OpenCodeSettingsTest(unittest.TestCase):
@@ -64,6 +69,55 @@ class OpenCodeSettingsTest(unittest.TestCase):
             )
             validate_config(saved)
 
+    def test_persists_each_cli_runtime_and_selected_provider(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "conf.yaml"
+            shutil.copyfile("conf.yaml", path)
+            cli = CLISettingsUpdate(
+                executable="/tmp/fake-cli",
+                model="test-model",
+                workspace_directory="/tmp",
+                timeout=45,
+            )
+            settings = AgentRuntimeSettingsUpdate(
+                provider="hermes_cli_llm",
+                opencode=OpenCodeSettingsUpdate(
+                    base_url="http://127.0.0.1:4096",
+                    provider_id="test-provider",
+                    model="test-model",
+                ),
+                claude_code=cli,
+                codex=cli.model_copy(update={"executable": "/tmp/fake-codex"}),
+                hermes=cli.model_copy(
+                    update={
+                        "executable": "/tmp/fake-hermes",
+                        "provider": "test-provider",
+                    }
+                ),
+            )
+
+            persist_runtime_settings(settings, path)
+
+            saved = yaml.safe_load(path.read_text(encoding="utf-8"))
+            agent_config = saved["character_config"]["agent_config"]
+            self.assertEqual(
+                agent_config["agent_settings"]["basic_memory_agent"]["llm_provider"],
+                "hermes_cli_llm",
+            )
+            self.assertEqual(
+                agent_config["llm_configs"]["claude_code_llm"]["executable"],
+                "/tmp/fake-cli",
+            )
+            self.assertEqual(
+                agent_config["llm_configs"]["codex_cli_llm"]["executable"],
+                "/tmp/fake-codex",
+            )
+            self.assertEqual(
+                agent_config["llm_configs"]["hermes_cli_llm"]["provider"],
+                "test-provider",
+            )
+            validate_config(saved)
+
     def test_all_character_presets_reference_installed_live2d_models(self):
         models = {
             model["name"]: model
@@ -81,6 +135,18 @@ class OpenCodeSettingsTest(unittest.TestCase):
             self.assertIn(model_name, models, path.name)
             model_path = Path(models[model_name]["url"].lstrip("/"))
             self.assertTrue(model_path.is_file(), f"{path.name}: {model_path}")
+
+    def test_default_templates_configure_all_agent_runtimes(self):
+        for path in (
+            Path("config_templates/conf.default.yaml"),
+            Path("config_templates/conf.ZH.default.yaml"),
+        ):
+            config = validate_config(yaml.safe_load(path.read_text(encoding="utf-8")))
+            llm_configs = config.character_config.agent_config.llm_configs
+            self.assertIsNotNone(llm_configs.opencode_llm, path)
+            self.assertIsNotNone(llm_configs.claude_code_llm, path)
+            self.assertIsNotNone(llm_configs.codex_cli_llm, path)
+            self.assertIsNotNone(llm_configs.hermes_cli_llm, path)
 
 
 if __name__ == "__main__":

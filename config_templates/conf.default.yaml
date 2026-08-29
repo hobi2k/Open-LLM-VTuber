@@ -57,7 +57,8 @@ character_config:
         # examples: 
         # 'openai_compatible_llm', 'llama_cpp_llm', 'claude_llm', 'ollama_llm'
         # 'openai_llm', 'gemini_llm', 'zhipu_llm', 'deepseek_llm', 'groq_llm'
-        # 'mistral_llm', 'lmstudio_llm', 'opencode_llm', and more
+        # 'mistral_llm', 'lmstudio_llm', 'opencode_llm', 'claude_code_llm',
+        # 'codex_cli_llm', 'hermes_cli_llm', and more
         llm_provider: 'ollama_llm'
         # let ai speak as soon as the first comma is received on the first sentence
         # to reduced latency.
@@ -128,6 +129,31 @@ character_config:
         allow_tools: False # Keep False for a voice-only character
         server_username: null
         server_password: null
+        interrupt_method: 'user'
+
+      # Installed agent CLIs. Leave model/provider blank to use each CLI's default.
+      claude_code_llm:
+        executable: 'claude'
+        model: ''
+        provider: ''
+        workspace_directory: '.'
+        timeout: 300
+        interrupt_method: 'user'
+
+      codex_cli_llm:
+        executable: 'codex'
+        model: ''
+        provider: ''
+        workspace_directory: '.'
+        timeout: 300
+        interrupt_method: 'user'
+
+      hermes_cli_llm:
+        executable: 'hermes'
+        model: ''
+        provider: ''
+        workspace_directory: '.'
+        timeout: 300
         interrupt_method: 'user'
 
       # Claude API Configuration

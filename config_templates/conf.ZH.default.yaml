@@ -58,7 +58,8 @@ character_config:
         # 例如：
         # 'openai_compatible_llm', 'llama_cpp_llm', 'claude_llm', 'ollama_llm'
         # 'openai_llm', 'gemini_llm', 'zhipu_llm', 'deepseek_llm', 'groq_llm'
-        # 'mistral_llm', 'lmstudio_llm', 'opencode_llm' 之类的
+        # 'mistral_llm', 'lmstudio_llm', 'opencode_llm', 'claude_code_llm',
+        # 'codex_cli_llm', 'hermes_cli_llm' 之类的
         llm_provider: 'ollama_llm' # 使用的 LLM 提供商
         # 是否在第一句回应时遇上逗号就直接生成音频以减少首句延迟（默认：True）
         faster_first_response: True
@@ -127,6 +128,31 @@ character_config:
         allow_tools: False # 纯语音角色请保持 False
         server_username: null
         server_password: null
+        interrupt_method: 'user'
+
+      # 已安装的代理 CLI。模型和提供商留空时使用各 CLI 的默认值。
+      claude_code_llm:
+        executable: 'claude'
+        model: ''
+        provider: ''
+        workspace_directory: '.'
+        timeout: 300
+        interrupt_method: 'user'
+
+      codex_cli_llm:
+        executable: 'codex'
+        model: ''
+        provider: ''
+        workspace_directory: '.'
+        timeout: 300
+        interrupt_method: 'user'
+
+      hermes_cli_llm:
+        executable: 'hermes'
+        model: ''
+        provider: ''
+        workspace_directory: '.'
+        timeout: 300
         interrupt_method: 'user'
 
       # Claude API 配置

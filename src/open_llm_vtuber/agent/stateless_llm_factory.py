@@ -10,6 +10,7 @@ from .stateless_llm.openai_compatible_llm import AsyncLLM as OpenAICompatibleLLM
 from .stateless_llm.ollama_llm import OllamaLLM
 from .stateless_llm.claude_llm import AsyncLLM as ClaudeLLM
 from .stateless_llm.opencode_llm import OpenCodeLLM
+from .stateless_llm.cli_agent_llm import CLIAgentLLM
 
 
 class LLMFactory:
@@ -74,6 +75,20 @@ class LLMFactory:
                 allow_tools=kwargs.get("allow_tools"),
                 server_username=kwargs.get("server_username"),
                 server_password=kwargs.get("server_password"),
+            )
+
+        if llm_provider in {"claude_code_llm", "codex_cli_llm", "hermes_cli_llm"}:
+            return CLIAgentLLM(
+                runtime={
+                    "claude_code_llm": "claude_code",
+                    "codex_cli_llm": "codex",
+                    "hermes_cli_llm": "hermes",
+                }[llm_provider],
+                executable=kwargs.get("executable"),
+                model=kwargs.get("model"),
+                provider=kwargs.get("provider"),
+                workspace_directory=kwargs.get("workspace_directory"),
+                timeout=kwargs.get("timeout"),
             )
 
         elif llm_provider == "llama_cpp_llm":

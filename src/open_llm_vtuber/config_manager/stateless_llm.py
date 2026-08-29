@@ -186,6 +186,16 @@ class OpenCodeConfig(StatelessLLMBaseConfig):
     }
 
 
+class CLIAgentConfig(StatelessLLMBaseConfig):
+    """Configuration shared by installed one-shot agent CLIs."""
+
+    executable: str = Field(..., min_length=1, alias="executable")
+    model: str = Field("", alias="model")
+    provider: str = Field("", alias="provider")
+    workspace_directory: str = Field(".", min_length=1, alias="workspace_directory")
+    timeout: float = Field(300, gt=0, alias="timeout")
+
+
 class LmStudioConfig(OpenAICompatibleConfig):
     """Configuration for LM Studio."""
 
@@ -304,6 +314,9 @@ class StatelessLLMConfigs(I18nMixin, BaseModel):
     )
     ollama_llm: OllamaConfig | None = Field(None, alias="ollama_llm")
     opencode_llm: OpenCodeConfig | None = Field(None, alias="opencode_llm")
+    claude_code_llm: CLIAgentConfig | None = Field(None, alias="claude_code_llm")
+    codex_cli_llm: CLIAgentConfig | None = Field(None, alias="codex_cli_llm")
+    hermes_cli_llm: CLIAgentConfig | None = Field(None, alias="hermes_cli_llm")
     lmstudio_llm: LmStudioConfig | None = Field(None, alias="lmstudio_llm")
     openai_llm: OpenAIConfig | None = Field(None, alias="openai_llm")
     gemini_llm: GeminiConfig | None = Field(None, alias="gemini_llm")
@@ -325,6 +338,15 @@ class StatelessLLMConfigs(I18nMixin, BaseModel):
         "opencode_llm": Description(
             en="Configuration for an OpenCode headless server",
             zh="OpenCode headless 服务器配置",
+        ),
+        "claude_code_llm": Description(
+            en="Configuration for Claude Code CLI", zh="Claude Code CLI 配置"
+        ),
+        "codex_cli_llm": Description(
+            en="Configuration for Codex CLI", zh="Codex CLI 配置"
+        ),
+        "hermes_cli_llm": Description(
+            en="Configuration for Hermes CLI", zh="Hermes CLI 配置"
         ),
         "ollama_llm": Description(en="Configuration for Ollama", zh="Ollama 配置"),
         "lmstudio_llm": Description(
