@@ -13,6 +13,7 @@ OpenCode 전용 설정을 OpenCode, Claude Code, Codex, Hermes 공통 런타임 
 - 개발한 것: 실행 파일·프로바이더·모델·프로젝트·세션을 목록에서 고르거나 직접 입력할 수 있는 편집형 선택기
 - 수정한 것: 연결 확인 시 저장하지 않은 런타임 선택과 입력값이 초기화되던 문제
 - 수정한 것: OpenCode 실행 파일이 서버 연결 상태와 별개로 자동 탐지·직접 경로 오류를 표시하도록 분리
+- 수정한 것: VAD의 ONNX Runtime 자산 경로가 `/assets/libs/`로 잘못 해석되고 `.mjs` 로더가 누락되던 문제
 - 수정한 것: Hermes safe-mode가 사용자 oMLX 공급자 설정을 무시해 401을 내던 문제
 - 개선한 것: Claude 도구 비활성화, Codex 읽기 전용, Hermes 규칙·도구 비활성화
 - 개선한 것: OpenCode의 agent 입력을 의미가 분명한 OpenCode profile 고급 설정으로 정리
@@ -36,6 +37,8 @@ OpenCode 전용 설정을 OpenCode, Claude Code, Codex, Hermes 공통 런타임 
 - 네 CLI 자동 탐지, OpenCode 잘못된 직접 경로 오류, 사용자 지정 프로바이더·모델·세션·실행 파일 입력 확인
 - 일본어 브라우저 UI에서 OpenCode 기존 세션 선택, 네 런타임 전환, 취소 시 설정 미저장을 실제 조작으로 확인
 - 최신 웹 번들 및 macOS arm64 Electron 앱 재빌드 성공
+- 웹에서 Silero 모델, ONNX `.mjs`·WASM, AudioWorklet 요청 200 및 실제 마이크 활성화 확인
+- Electron 패키지 내부의 ONNX `.mjs` 4개·WASM 4개 포함과 오디오 프로세스 실행 확인
 
 ## 다음 단계
 - 기존 Live2D SDK TypeScript 오류를 별도 정리
