@@ -33,6 +33,11 @@ from .agent_runtime_settings import (
     runtime_settings_payload,
 )
 from .agent_runtime_catalog import runtime_catalog_payload
+from .audio_settings import (
+    TTSSettingsUpdate,
+    apply_tts_settings,
+    audio_settings_payload,
+)
 
 
 def init_client_ws_route(default_context_cache: ServiceContext) -> APIRouter:
@@ -113,6 +118,27 @@ def init_client_ws_route(default_context_cache: ServiceContext) -> APIRouter:
     async def get_agent_runtime_catalog(request: Request):
         require_local_request(request)
         return await runtime_catalog_payload(default_context_cache)
+
+    @router.get("/api/audio/settings")
+    async def get_audio_settings(request: Request):
+        require_local_request(request)
+        return audio_settings_payload(default_context_cache)
+
+    @router.put("/api/audio/settings")
+    async def update_audio_settings(
+        request: Request,
+        settings: TTSSettingsUpdate,
+    ):
+        require_local_request(request)
+        try:
+            apply_tts_settings(
+                default_context_cache,
+                ws_handler.client_contexts.values(),
+                settings,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return audio_settings_payload(default_context_cache)
 
     @router.websocket("/client-ws")
     async def websocket_endpoint(websocket: WebSocket):
