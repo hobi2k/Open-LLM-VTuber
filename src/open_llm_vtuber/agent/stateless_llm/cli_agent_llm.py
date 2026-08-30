@@ -116,8 +116,14 @@ class CLIAgentLLM(StatelessLLMInterface):
                 if self.show_reasoning and not reasoning_started
                 else ""
             )
-            if self.show_reasoning and self.runtime == "hermes":
-                reasoning = await asyncio.to_thread(self._hermes_reasoning_text)
+            if self.runtime == "hermes":
+                native_response, native_reasoning = await asyncio.to_thread(
+                    self._hermes_message_text
+                )
+                if native_response:
+                    response = native_response
+                if self.show_reasoning:
+                    reasoning = native_reasoning
             if reasoning:
                 yield self._reasoning_event("reasoning-start", reasoning_id)
                 yield self._reasoning_event(
@@ -170,7 +176,7 @@ class CLIAgentLLM(StatelessLLMInterface):
                 "dontAsk",
             ]
             if self.show_reasoning:
-                command.append("--include-partial-messages")
+                command.extend(["--include-partial-messages", "--verbose"])
             if self.session_id:
                 command.extend(["--resume", self.session_id])
             else:
@@ -239,7 +245,14 @@ class CLIAgentLLM(StatelessLLMInterface):
 
     def _response_text(self, output: str) -> str:
         if self.runtime == "hermes":
-            return output.strip()
+            if "Reasoning" not in output:
+                return output.strip()
+            lines = [
+                line.strip()
+                for line in output.replace("\r", "").splitlines()
+                if line.strip() and not line.strip().lower().startswith("session_id:")
+            ]
+            return lines[-1] if lines else ""
 
         if self.runtime == "claude_code":
             payloads = self._json_payloads(output)
@@ -361,14 +374,14 @@ class CLIAgentLLM(StatelessLLMInterface):
             return "".join(deltas)
         return self._reasoning_text(output)
 
-    def _hermes_reasoning_text(self) -> str:
+    def _hermes_message_text(self) -> tuple[str, str]:
         if not self.session_id:
-            return ""
+            return "", ""
         database = (
             Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes")) / "state.db"
         )
         if not database.is_file():
-            return ""
+            return "", ""
         try:
             connection = sqlite3.connect(
                 f"file:{database}?mode=ro",
@@ -377,7 +390,7 @@ class CLIAgentLLM(StatelessLLMInterface):
             )
             row = connection.execute(
                 """
-                SELECT reasoning_content, reasoning, reasoning_details,
+                SELECT content, reasoning_content, reasoning, reasoning_details,
                        codex_reasoning_items
                 FROM messages
                 WHERE session_id = ? AND role = 'assistant' AND active = 1
@@ -389,17 +402,26 @@ class CLIAgentLLM(StatelessLLMInterface):
             connection.close()
         except sqlite3.Error as error:
             logger.warning("Could not read Hermes reasoning: {}", error)
-            return ""
+            return "", ""
         if not row:
-            return ""
-        for value in row:
+            return "", ""
+        response_value = row[0]
+        response_json = (
+            self._json_value(response_value)
+            if isinstance(response_value, str)
+            else None
+        )
+        response = self._structured_text(
+            response_json if response_json is not None else response_value
+        )
+        for value in row[1:]:
             if not isinstance(value, str) or not value.strip():
                 continue
             with_json = self._json_value(value)
             text = self._structured_text(with_json if with_json is not None else value)
             if text:
-                return text
-        return ""
+                return response, text
+        return response, ""
 
     @staticmethod
     def _json_payloads(output: str) -> List[Dict[str, Any]]:

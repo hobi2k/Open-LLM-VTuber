@@ -11,11 +11,12 @@ OpenCode, Claude Code, Codex, Hermes가 제공하는 네이티브 reasoning을 �
 - 개선한 것: reasoning을 VTuber 대화 메모리와 히스토리 미리보기에서 분리
 
 ## 결과
-- 백엔드 관련 테스트 26개 통과
+- 백엔드 관련 테스트 27개 통과
 - Ruff, 프런트 TypeScript, ESLint, diff 검사 통과
 - 웹 및 Electron production 빌드 성공
 - Electron에서 OpenCode ON/OFF 실응답과 설정 재실행 지속성 확인
+- Claude Code, Codex, Hermes 설치 CLI 실호출과 최종 응답 분리 확인
 
 ## 다음 단계
-- Claude Code, Codex, Hermes 실제 계정 환경을 포함한 선택형 E2E 테스트 자동화
+- 네 provider 실호출을 반복할 수 있는 선택형 E2E 테스트 자동화
 - provider CLI 출력 형식 변경을 감지하는 호환성 테스트 추가

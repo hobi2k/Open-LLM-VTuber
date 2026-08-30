@@ -149,6 +149,7 @@ class CLIAgentLLMTest(unittest.IsolatedAsyncioTestCase):
         )
         arguments = json.loads(self.arguments.read_text(encoding="utf-8"))
         self.assertIn("--include-partial-messages", arguments)
+        self.assertIn("--verbose", arguments)
         self.assertNotIn("--effort", arguments)
 
     async def test_codex_exposes_reasoning_without_overriding_config(self):
@@ -174,6 +175,7 @@ class CLIAgentLLMTest(unittest.IsolatedAsyncioTestCase):
                 id INTEGER PRIMARY KEY,
                 session_id TEXT,
                 role TEXT,
+                content TEXT,
                 reasoning_content TEXT,
                 reasoning TEXT,
                 reasoning_details TEXT,
@@ -185,8 +187,11 @@ class CLIAgentLLMTest(unittest.IsolatedAsyncioTestCase):
         connection.execute(
             """
             INSERT INTO messages (
-                session_id, role, reasoning_content, active
-            ) VALUES ('hermes-test', 'assistant', 'Hermes reasoning', 1)
+                session_id, role, content, reasoning_content, active
+            ) VALUES (
+                'hermes-test', 'assistant', 'Hermes response',
+                'Hermes reasoning', 1
+            )
             """
         )
         connection.commit()
@@ -209,6 +214,19 @@ class CLIAgentLLMTest(unittest.IsolatedAsyncioTestCase):
             ),
             "Hermes reasoning",
         )
+        self.assertEqual(
+            "".join(chunk for chunk in chunks if isinstance(chunk, str)),
+            "Hermes response",
+        )
+
+    def test_hermes_reasoning_panel_does_not_leak_into_response(self):
+        llm = self._llm("hermes")
+
+        response = llm._response_text(
+            "\r\n┌─ Reasoning ─────────┐\r\n\r\nInternal notes\r\n\r\nOK\n"
+        )
+
+        self.assertEqual(response, "OK")
 
     async def test_codex_resumes_created_thread(self):
         llm = self._llm("codex")
