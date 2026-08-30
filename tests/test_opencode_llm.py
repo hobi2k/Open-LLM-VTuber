@@ -13,6 +13,7 @@ class OpenCodeHandler(BaseHTTPRequestHandler):
     prompt_started = threading.Event()
     requests = []
     use_deltas = True
+    assistant_error = None
 
     def do_POST(self):
         body = self._body()
@@ -45,9 +46,21 @@ class OpenCodeHandler(BaseHTTPRequestHandler):
                 "message.updated",
                 {
                     "sessionID": "ses_test",
-                    "info": {"id": "msg_assistant", "role": "assistant"},
+                    "info": {
+                        "id": "msg_assistant",
+                        "role": "assistant",
+                        **(
+                            {"error": self.assistant_error}
+                            if self.assistant_error
+                            else {}
+                        ),
+                    },
                 },
             )
+            if self.assistant_error:
+                self._event("session.idle", {"sessionID": "ses_test"})
+                self.close_connection = True
+                return
             self._event(
                 "message.part.updated",
                 {
@@ -142,6 +155,7 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
         OpenCodeHandler.prompt_started = threading.Event()
         OpenCodeHandler.requests = []
         OpenCodeHandler.use_deltas = True
+        OpenCodeHandler.assistant_error = None
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), OpenCodeHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -253,6 +267,24 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
             if method == "POST" and path == "/session"
         )
         self.assertNotIn("permission", session_request)
+
+    async def test_interrupted_prompt_finishes_without_error_or_second_abort(self):
+        OpenCodeHandler.assistant_error = {
+            "name": "MessageAbortedError",
+            "data": {"message": "Aborted"},
+        }
+
+        chunks = [
+            chunk
+            async for chunk in self._llm().chat_completion(
+                [{"role": "user", "content": "중단될 요청"}]
+            )
+        ]
+
+        self.assertEqual(chunks, [])
+        self.assertNotIn(
+            ("POST", "/session/ses_test/abort", None), OpenCodeHandler.requests
+        )
 
     def test_config_defaults_are_safe(self):
         config = OpenCodeConfig(provider_id="omlx", model="local-model")

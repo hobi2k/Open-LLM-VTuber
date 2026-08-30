@@ -12,6 +12,10 @@ from loguru import logger
 from .stateless_llm_interface import StatelessLLMInterface
 
 
+class OpenCodePromptAborted(Exception):
+    """Raised when OpenCode confirms that an interrupted prompt stopped."""
+
+
 class OpenCodeLLM(StatelessLLMInterface):
     """Use an OpenCode server as a stateless, streaming LLM backend."""
 
@@ -115,6 +119,10 @@ class OpenCodeLLM(StatelessLLMInterface):
                     raise RuntimeError(
                         "OpenCode completed without an assistant response"
                     )
+            except OpenCodePromptAborted:
+                completed = True
+                logger.info("OpenCode prompt stopped after interruption")
+                return
             except httpx.HTTPStatusError as exc:
                 logger.error(
                     "OpenCode API returned {}: {}",
@@ -205,8 +213,14 @@ class OpenCodeLLM(StatelessLLMInterface):
                 info = properties.get("info", {})
                 if info.get("role") == "assistant":
                     assistant_messages.add(info.get("id"))
-                    if info.get("error"):
-                        raise RuntimeError(str(info["error"]))
+                    error = info.get("error")
+                    if (
+                        isinstance(error, dict)
+                        and error.get("name") == "MessageAbortedError"
+                    ):
+                        raise OpenCodePromptAborted
+                    if error:
+                        raise RuntimeError(str(error))
                 continue
 
             if event.get("type") == "message.part.updated":

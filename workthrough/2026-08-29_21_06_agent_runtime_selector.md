@@ -14,6 +14,11 @@ OpenCode 전용 설정을 OpenCode, Claude Code, Codex, Hermes 공통 런타임 
 - 수정한 것: 연결 확인 시 저장하지 않은 런타임 선택과 입력값이 초기화되던 문제
 - 수정한 것: OpenCode 실행 파일이 서버 연결 상태와 별개로 자동 탐지·직접 경로 오류를 표시하도록 분리
 - 수정한 것: VAD의 ONNX Runtime 자산 경로가 `/assets/libs/`로 잘못 해석되고 `.mjs` 로더가 누락되던 문제
+- 수정한 것: Live2D 설정 도착 전에 `/undefined/undefined.model3.json`을 요청하던 초기화 순서 문제
+- 수정한 것: WebGL2가 없을 때 WebGL1으로 폴백하고 차단 팝업 대신 안전하게 초기화를 중단하도록 개선
+- 수정한 것: Electron preload가 샌드박스에서 `@electron-toolkit/preload`을 찾지 못하던 패키징 문제
+- 수정한 것: Electron 종료 시 Live2D 렌더 루프가 해제된 객체를 다시 사용하던 경쟁 조건
+- 수정한 것: 정상 중단된 OpenCode 요청을 일반 응답 실패로 기록하고 오류 문구를 내보내던 문제
 - 수정한 것: Hermes safe-mode가 사용자 oMLX 공급자 설정을 무시해 401을 내던 문제
 - 개선한 것: Claude 도구 비활성화, Codex 읽기 전용, Hermes 규칙·도구 비활성화
 - 개선한 것: OpenCode의 agent 입력을 의미가 분명한 OpenCode profile 고급 설정으로 정리
@@ -39,7 +44,10 @@ OpenCode 전용 설정을 OpenCode, Claude Code, Codex, Hermes 공통 런타임 
 - 최신 웹 번들 및 macOS arm64 Electron 앱 재빌드 성공
 - 웹에서 Silero 모델, ONNX `.mjs`·WASM, AudioWorklet 요청 200 및 실제 마이크 활성화 확인
 - Electron 패키지 내부의 ONNX `.mjs` 4개·WASM 4개 포함과 오디오 프로세스 실행 확인
+- 프런트엔드 Node/Web TypeScript 검사 0 오류, 변경 파일 ESLint 및 웹 빌드 통과
+- 웹 초기 로드 5회에서 잘못된 Live2D 요청·VAD 오류·WebGL 팝업 없음 확인
+- Electron preload, VAD, Live2D 실제 시작과 앱 종료 후 Uncaught 오류 없음 확인
+- OpenCode 정상 중단 회귀를 포함한 런타임 백엔드 테스트 22개 통과
 
 ## 다음 단계
-- 기존 Live2D SDK TypeScript 오류를 별도 정리
 - 외부 배포 전 Apple Developer ID 인증서로 서명하고 Apple 공증 완료
