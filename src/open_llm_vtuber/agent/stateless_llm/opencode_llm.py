@@ -4,7 +4,7 @@ import json
 import mimetypes
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, List
+from typing import Any, AsyncIterator, Dict, List, Union
 
 import httpx
 from loguru import logger
@@ -30,6 +30,7 @@ class OpenCodeLLM(StatelessLLMInterface):
         timeout: float = 300,
         keep_sessions: bool = False,
         allow_tools: bool = False,
+        show_reasoning: bool = False,
         server_username: str | None = None,
         server_password: str | None = None,
     ):
@@ -42,6 +43,7 @@ class OpenCodeLLM(StatelessLLMInterface):
         self.timeout = timeout
         self.keep_sessions = keep_sessions
         self.allow_tools = allow_tools
+        self.show_reasoning = show_reasoning
         self.server_username = server_username
         self.server_password = server_password
         self.support_tools = False
@@ -59,7 +61,7 @@ class OpenCodeLLM(StatelessLLMInterface):
         messages: List[Dict[str, Any]],
         system: str = None,
         tools: List[Dict[str, Any]] = None,
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[Union[str, Dict[str, Any]]]:
         if tools:
             logger.warning(
                 "OpenCodeLLM received external tools, but MCP tool forwarding is not "
@@ -102,16 +104,17 @@ class OpenCodeLLM(StatelessLLMInterface):
                         system,
                     )
 
-                    emitted = False
+                    emitted_text = False
                     async for chunk in self._stream_text(
                         event_lines,
                         session_id,
                     ):
-                        emitted = True
+                        if isinstance(chunk, str):
+                            emitted_text = True
                         yield chunk
 
                 completed = True
-                if not emitted:
+                if not emitted_text:
                     fallback = await self._last_assistant_text(client, session_id)
                     if fallback:
                         yield fallback
@@ -193,15 +196,17 @@ class OpenCodeLLM(StatelessLLMInterface):
                 return
         raise RuntimeError("OpenCode event stream closed before connecting")
 
-    @staticmethod
-    async def _stream_text(event_lines, session_id: str) -> AsyncIterator[str]:
+    async def _stream_text(
+        self, event_lines, session_id: str
+    ) -> AsyncIterator[Union[str, Dict[str, Any]]]:
         assistant_messages = set()
-        text_parts = set()
+        part_types: Dict[str, str] = {}
         raw_text: Dict[str, str] = {}
+        active_reasoning = set()
         output_started = False
 
         async for line in event_lines:
-            event = OpenCodeLLM._parse_event(line)
+            event = self._parse_event(line)
             if not event:
                 continue
 
@@ -225,20 +230,30 @@ class OpenCodeLLM(StatelessLLMInterface):
 
             if event.get("type") == "message.part.updated":
                 part = properties.get("part", {})
-                if (
-                    part.get("type") == "text"
-                    and part.get("messageID") in assistant_messages
-                ):
+                part_type = part.get("type")
+                if part.get("messageID") in assistant_messages and part_type in {
+                    "text",
+                    "reasoning",
+                }:
                     part_id = part.get("id")
                     if not part_id:
                         continue
-                    text_parts.add(part_id)
+                    part_types[part_id] = part_type
                     complete_text = part.get("text", "")
                     previous_text = raw_text.get(part_id, "")
                     if complete_text.startswith(previous_text):
                         chunk = complete_text[len(previous_text) :]
                         raw_text[part_id] = complete_text
-                        chunk, output_started = OpenCodeLLM._visible_chunk(
+                        if part_type == "reasoning":
+                            if self.show_reasoning and part_id not in active_reasoning:
+                                active_reasoning.add(part_id)
+                                yield self._reasoning_event("reasoning-start", part_id)
+                            if self.show_reasoning and chunk:
+                                yield self._reasoning_event(
+                                    "reasoning-delta", part_id, chunk
+                                )
+                            continue
+                        chunk, output_started = self._visible_chunk(
                             chunk, output_started
                         )
                         if chunk:
@@ -247,21 +262,31 @@ class OpenCodeLLM(StatelessLLMInterface):
 
             if event.get("type") == "message.part.delta":
                 part_id = properties.get("partID")
+                part_type = part_types.get(part_id)
                 if (
                     properties.get("messageID") in assistant_messages
-                    and part_id in text_parts
+                    and part_type in {"text", "reasoning"}
                     and properties.get("field") == "text"
                 ):
                     chunk = properties.get("delta", "")
                     raw_text[part_id] = raw_text.get(part_id, "") + chunk
-                    chunk, output_started = OpenCodeLLM._visible_chunk(
-                        chunk, output_started
-                    )
+                    if part_type == "reasoning":
+                        if self.show_reasoning and part_id not in active_reasoning:
+                            active_reasoning.add(part_id)
+                            yield self._reasoning_event("reasoning-start", part_id)
+                        if self.show_reasoning and chunk:
+                            yield self._reasoning_event(
+                                "reasoning-delta", part_id, chunk
+                            )
+                        continue
+                    chunk, output_started = self._visible_chunk(chunk, output_started)
                     if chunk:
                         yield chunk
                 continue
 
             if event.get("type") == "session.idle":
+                for part_id in active_reasoning:
+                    yield self._reasoning_event("reasoning-end", part_id)
                 return
 
         raise RuntimeError("OpenCode event stream closed before the response completed")
@@ -272,6 +297,14 @@ class OpenCodeLLM(StatelessLLMInterface):
             return chunk, True
         visible = chunk.lstrip()
         return visible, bool(visible)
+
+    @staticmethod
+    def _reasoning_event(event_type: str, part_id: str, text: str = "") -> dict:
+        return {
+            "type": event_type,
+            "reasoning_id": part_id,
+            "text": text,
+        }
 
     @staticmethod
     def _parse_event(line: str) -> Dict[str, Any] | None:

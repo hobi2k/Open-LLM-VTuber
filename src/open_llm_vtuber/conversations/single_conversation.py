@@ -90,14 +90,14 @@ async def process_single_conversation(
             agent_output_stream = context.agent_engine.chat(batch_input)
 
             async for output_item in agent_output_stream:
-                if (
-                    isinstance(output_item, dict)
-                    and output_item.get("type") == "tool_call_status"
-                ):
-                    # Handle tool status event: send WebSocket message
+                if isinstance(output_item, dict) and output_item.get("type") in {
+                    "tool_call_status",
+                    "reasoning-start",
+                    "reasoning-delta",
+                    "reasoning-end",
+                }:
                     output_item["name"] = context.character_config.character_name
-                    logger.debug(f"Sending tool status update: {output_item}")
-
+                    logger.debug(f"Sending agent status update: {output_item}")
                     await websocket_send(json.dumps(output_item))
 
                 elif isinstance(output_item, (SentenceOutput, AudioOutput)):

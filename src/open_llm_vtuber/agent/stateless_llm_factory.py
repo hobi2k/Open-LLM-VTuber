@@ -74,6 +74,7 @@ class LLMFactory:
                 timeout=kwargs.get("timeout"),
                 keep_sessions=kwargs.get("keep_sessions"),
                 allow_tools=kwargs.get("allow_tools"),
+                show_reasoning=kwargs.get("show_reasoning", False),
                 server_username=kwargs.get("server_username"),
                 server_password=kwargs.get("server_password"),
             )
@@ -92,6 +93,7 @@ class LLMFactory:
                 session_id=kwargs.get("session_id", ""),
                 workspace_directory=kwargs.get("workspace_directory"),
                 timeout=kwargs.get("timeout"),
+                show_reasoning=kwargs.get("show_reasoning", False),
             )
 
         elif llm_provider == "llama_cpp_llm":

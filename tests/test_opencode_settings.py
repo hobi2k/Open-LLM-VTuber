@@ -55,6 +55,7 @@ class OpenCodeSettingsTest(unittest.TestCase):
                 timeout=42,
                 keep_sessions=True,
                 allow_tools=True,
+                show_reasoning=True,
             )
 
             persist_opencode_settings(settings, path)
@@ -74,6 +75,9 @@ class OpenCodeSettingsTest(unittest.TestCase):
                 "/tmp/custom-opencode",
             )
             validate_config(saved)
+            self.assertTrue(
+                agent_config["llm_configs"]["opencode_llm"]["show_reasoning"]
+            )
 
     def test_persists_each_cli_runtime_and_selected_provider(self):
         with tempfile.TemporaryDirectory() as directory:

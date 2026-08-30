@@ -1,5 +1,6 @@
 import json
 import os
+import sqlite3
 import tempfile
 import textwrap
 import unittest
@@ -27,12 +28,34 @@ class CLIAgentLLMTest(unittest.IsolatedAsyncioTestCase):
                 content = sys.stdin.read()
                 pathlib.Path({str(self.stdin)!r}).write_text(content)
                 if "-p" in sys.argv:
-                    print(json.dumps({{
-                        "result": "Claude response",
-                        "session_id": "11111111-1111-1111-1111-111111111111",
-                    }}))
+                    if "stream-json" in sys.argv:
+                        print(json.dumps({{
+                            "type": "system",
+                            "session_id": "11111111-1111-1111-1111-111111111111",
+                        }}))
+                        print(json.dumps({{
+                            "type": "stream_event",
+                            "event": {{
+                                "type": "content_block_delta",
+                                "delta": {{"type": "thinking_delta", "thinking": "Claude reasoning"}},
+                            }},
+                        }}))
+                        print(json.dumps({{
+                            "type": "result",
+                            "result": "Claude response",
+                            "session_id": "11111111-1111-1111-1111-111111111111",
+                        }}))
+                    else:
+                        print(json.dumps({{
+                            "result": "Claude response",
+                            "session_id": "11111111-1111-1111-1111-111111111111",
+                        }}))
                 elif "exec" in sys.argv:
                     print(json.dumps({{"type": "thread.started", "thread_id": "test"}}))
+                    print(json.dumps({{
+                        "type": "item.completed",
+                        "item": {{"type": "reasoning", "text": "Codex reasoning"}},
+                    }}))
                     print(json.dumps({{
                         "type": "item.completed",
                         "item": {{"type": "agent_message", "text": "Codex response"}},
@@ -82,7 +105,7 @@ class CLIAgentLLMTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("--safe-mode", arguments)
         self.assertIn("--ignore-rules", arguments)
         self.assertEqual(arguments[arguments.index("--toolsets") + 1], "")
-        self.assertEqual(arguments[arguments.index("--reasoning") + 1], "none")
+        self.assertNotIn("--reasoning", arguments)
         self.assertEqual(arguments[arguments.index("--model") + 1], "test-model")
         self.assertEqual(arguments[arguments.index("--provider") + 1], "test-provider")
         prompt = arguments[arguments.index("--query") + 1]
@@ -109,6 +132,84 @@ class CLIAgentLLMTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(self.stdin.read_text(encoding="utf-8"), "Hello")
 
+    async def test_claude_exposes_reasoning_without_changing_effort(self):
+        chunks = await self._chunks(self._llm("claude_code", show_reasoning=True))
+
+        self.assertEqual(
+            [chunk["type"] for chunk in chunks if isinstance(chunk, dict)],
+            ["reasoning-start", "reasoning-delta", "reasoning-end"],
+        )
+        self.assertEqual(
+            next(
+                chunk["text"]
+                for chunk in chunks
+                if isinstance(chunk, dict) and chunk["type"] == "reasoning-delta"
+            ),
+            "Claude reasoning",
+        )
+        arguments = json.loads(self.arguments.read_text(encoding="utf-8"))
+        self.assertIn("--include-partial-messages", arguments)
+        self.assertNotIn("--effort", arguments)
+
+    async def test_codex_exposes_reasoning_without_overriding_config(self):
+        chunks = await self._chunks(self._llm("codex", show_reasoning=True))
+
+        self.assertEqual(
+            next(
+                chunk["text"]
+                for chunk in chunks
+                if isinstance(chunk, dict) and chunk["type"] == "reasoning-delta"
+            ),
+            "Codex reasoning",
+        )
+        arguments = json.loads(self.arguments.read_text(encoding="utf-8"))
+        self.assertNotIn("model_reasoning_effort", " ".join(arguments))
+
+    async def test_hermes_reads_reasoning_from_its_native_session(self):
+        database = self.directory / "state.db"
+        connection = sqlite3.connect(database)
+        connection.execute(
+            """
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY,
+                session_id TEXT,
+                role TEXT,
+                reasoning_content TEXT,
+                reasoning TEXT,
+                reasoning_details TEXT,
+                codex_reasoning_items TEXT,
+                active INTEGER
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO messages (
+                session_id, role, reasoning_content, active
+            ) VALUES ('hermes-test', 'assistant', 'Hermes reasoning', 1)
+            """
+        )
+        connection.commit()
+        connection.close()
+        previous_home = os.environ.get("HERMES_HOME")
+        os.environ["HERMES_HOME"] = str(self.directory)
+        try:
+            chunks = await self._chunks(self._llm("hermes", show_reasoning=True))
+        finally:
+            if previous_home is None:
+                os.environ.pop("HERMES_HOME", None)
+            else:
+                os.environ["HERMES_HOME"] = previous_home
+
+        self.assertEqual(
+            next(
+                chunk["text"]
+                for chunk in chunks
+                if isinstance(chunk, dict) and chunk["type"] == "reasoning-delta"
+            ),
+            "Hermes reasoning",
+        )
+
     async def test_codex_resumes_created_thread(self):
         llm = self._llm("codex")
         await self._complete_with(llm)
@@ -131,7 +232,7 @@ class CLIAgentLLMTest(unittest.IsolatedAsyncioTestCase):
     async def _complete(self, runtime, model="", provider=""):
         return await self._complete_with(self._llm(runtime, model, provider))
 
-    def _llm(self, runtime, model="", provider=""):
+    def _llm(self, runtime, model="", provider="", show_reasoning=False):
         return CLIAgentLLM(
             runtime=runtime,
             executable=str(self.executable),
@@ -139,10 +240,15 @@ class CLIAgentLLMTest(unittest.IsolatedAsyncioTestCase):
             provider=provider,
             workspace_directory=str(self.directory),
             timeout=5,
+            show_reasoning=show_reasoning,
         )
 
     async def _complete_with(self, llm):
-        chunks = [
+        chunks = await self._chunks(llm)
+        return "".join(chunk for chunk in chunks if isinstance(chunk, str))
+
+    async def _chunks(self, llm):
+        return [
             chunk
             async for chunk in llm.chat_completion(
                 [
@@ -152,7 +258,6 @@ class CLIAgentLLMTest(unittest.IsolatedAsyncioTestCase):
                 system="Character prompt",
             )
         ]
-        return "".join(chunks)
 
 
 if __name__ == "__main__":

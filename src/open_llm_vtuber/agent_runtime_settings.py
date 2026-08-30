@@ -32,6 +32,7 @@ class CLISettingsUpdate(BaseModel):
     provider: str = ""
     workspace_directory: str = Field(default=".", min_length=1)
     timeout: float = Field(default=300, gt=0)
+    show_reasoning: bool = False
 
 
 class AgentRuntimeSettingsUpdate(BaseModel):
@@ -119,6 +120,7 @@ def _cli_payload(config: CLIAgentConfig) -> dict:
         "provider": config.provider,
         "workspace_directory": config.workspace_directory,
         "timeout": config.timeout,
+        "show_reasoning": config.show_reasoning,
     }
 
 
@@ -157,6 +159,7 @@ async def runtime_settings_payload(context: ServiceContext) -> dict:
             "timeout": opencode.timeout,
             "keep_sessions": opencode.keep_sessions,
             "allow_tools": opencode.allow_tools,
+            "show_reasoning": opencode.show_reasoning,
             "has_server_password": bool(opencode.server_password),
             "connection": opencode_status,
         },

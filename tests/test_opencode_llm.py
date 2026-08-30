@@ -253,6 +253,25 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual("".join(chunks), "안녕하세요")
 
+    async def test_streams_reasoning_separately_when_enabled(self):
+        chunks = [
+            chunk
+            async for chunk in self._llm(show_reasoning=True).chat_completion(
+                [{"role": "user", "content": "안녕"}]
+            )
+        ]
+
+        reasoning = [chunk for chunk in chunks if isinstance(chunk, dict)]
+        self.assertEqual(
+            [chunk["type"] for chunk in reasoning],
+            ["reasoning-start", "reasoning-delta", "reasoning-end"],
+        )
+        self.assertEqual(reasoning[1]["text"], "private reasoning")
+        self.assertEqual(
+            "".join(chunk for chunk in chunks if isinstance(chunk, str)),
+            "안녕하세요",
+        )
+
     async def test_allow_tools_omits_session_permission_override(self):
         llm = self._llm(allow_tools=True)
         _ = [
@@ -293,7 +312,7 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(config.agent, "vtuber")
         self.assertEqual(config.executable, "auto")
 
-    def _llm(self, allow_tools=False):
+    def _llm(self, allow_tools=False, show_reasoning=False):
         return OpenCodeLLM(
             base_url=f"http://127.0.0.1:{self.server.server_port}",
             provider_id="omlx",
@@ -302,6 +321,7 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
             workspace_directory=".",
             timeout=5,
             allow_tools=allow_tools,
+            show_reasoning=show_reasoning,
         )
 
 

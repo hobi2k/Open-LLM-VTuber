@@ -137,6 +137,7 @@ class OpenCodeConfig(StatelessLLMBaseConfig):
     timeout: float = Field(300, gt=0, alias="timeout")
     keep_sessions: bool = Field(False, alias="keep_sessions")
     allow_tools: bool = Field(False, alias="allow_tools")
+    show_reasoning: bool = Field(False, alias="show_reasoning")
     server_username: str | None = Field(None, alias="server_username")
     server_password: str | None = Field(None, alias="server_password")
 
@@ -203,6 +204,7 @@ class CLIAgentConfig(StatelessLLMBaseConfig):
     provider: str = Field("", alias="provider")
     workspace_directory: str = Field(".", min_length=1, alias="workspace_directory")
     timeout: float = Field(300, gt=0, alias="timeout")
+    show_reasoning: bool = Field(False, alias="show_reasoning")
 
 
 class LmStudioConfig(OpenAICompatibleConfig):

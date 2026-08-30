@@ -354,12 +354,14 @@ async def process_member_response(
         agent_output_stream = context.agent_engine.chat(batch_input)
 
         async for output_item in agent_output_stream:
-            if (
-                isinstance(output_item, dict)
-                and output_item.get("type") == "tool_call_status"
-            ):
+            if isinstance(output_item, dict) and output_item.get("type") in {
+                "tool_call_status",
+                "reasoning-start",
+                "reasoning-delta",
+                "reasoning-end",
+            }:
                 if broadcast_func and group_members:
-                    logger.debug(f"Broadcasting tool status update: {output_item}")
+                    logger.debug(f"Broadcasting agent status update: {output_item}")
                     output_item["name"] = context.character_config.character_name
                     await broadcast_func(group_members, output_item)
                 else:

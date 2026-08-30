@@ -25,6 +25,7 @@ class OpenCodeSettingsUpdate(BaseModel):
     timeout: float = Field(default=300, gt=0)
     keep_sessions: bool = False
     allow_tools: bool = False
+    show_reasoning: bool = False
 
 
 def require_loopback_client(host: str | None) -> None:
@@ -57,6 +58,7 @@ def settings_payload(context: ServiceContext) -> dict:
         "timeout": config.timeout,
         "keep_sessions": config.keep_sessions,
         "allow_tools": config.allow_tools,
+        "show_reasoning": config.show_reasoning,
         "has_server_password": bool(config.server_password),
     }
 

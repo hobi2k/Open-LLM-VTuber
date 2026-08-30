@@ -649,6 +649,13 @@ class BasicMemoryAgent(AgentInterface):
                     text_chunk = ""
                     if isinstance(event, dict) and event.get("type") == "text_delta":
                         text_chunk = event.get("text", "")
+                    elif isinstance(event, dict) and event.get("type") in {
+                        "reasoning-start",
+                        "reasoning-delta",
+                        "reasoning-end",
+                    }:
+                        yield event
+                        continue
                     elif isinstance(event, str):
                         text_chunk = event
                     else:

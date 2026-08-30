@@ -1,5 +1,5 @@
 import abc
-from typing import AsyncIterator, List, Dict, Any
+from typing import AsyncIterator, List, Dict, Any, Union
 
 
 class StatelessLLMInterface(metaclass=abc.ABCMeta):
@@ -24,7 +24,7 @@ class StatelessLLMInterface(metaclass=abc.ABCMeta):
         messages: List[Dict[str, Any]],
         system: str = None,
         tools: List[Dict[str, Any]] = None,
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[Union[str, Dict[str, Any]]]:
         """
         Generates a chat completion asynchronously and return an iterator to the response.
         This function does not store memory or user messages.
@@ -54,7 +54,8 @@ class StatelessLLMInterface(metaclass=abc.ABCMeta):
             }
 
         Yields:
-        - str: The content of each chunk from the API response.
+        - str: The visible response text.
+        - dict: A non-verbal status stream such as reasoning or tool activity.
 
         Raises:
         - APIConnectionError: When the server cannot be reached
