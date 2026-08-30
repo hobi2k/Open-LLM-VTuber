@@ -85,11 +85,7 @@ async def _opencode_catalog(config: OpenCodeConfig) -> dict:
             auth=auth,
             timeout=min(config.timeout, 3),
         ) as client:
-            (
-                provider_response,
-                project_response,
-                session_response,
-            ) = await asyncio.gather(
+            provider_response, project_response = await asyncio.gather(
                 client.get(
                     "/provider",
                     params={"directory": config.workspace_directory},
@@ -98,17 +94,25 @@ async def _opencode_catalog(config: OpenCodeConfig) -> dict:
                     "/project",
                     params={"directory": config.workspace_directory},
                 ),
-                client.get(
-                    "/session",
-                    params={
-                        "directory": config.workspace_directory,
-                        "limit": 50,
-                    },
-                ),
             )
             provider_response.raise_for_status()
             project_response.raise_for_status()
-            session_response.raise_for_status()
+            projects = project_response.json()
+            directories = list(
+                dict.fromkeys(
+                    [
+                        config.workspace_directory,
+                        *(
+                            str(project.get("worktree") or project.get("directory"))
+                            for project in projects
+                            if project.get("worktree") or project.get("directory")
+                        ),
+                    ]
+                )
+            )
+            session_groups = await asyncio.gather(
+                *(_opencode_sessions(client, directory) for directory in directories)
+            )
     except (httpx.HTTPError, ValueError):
         return result
 
@@ -135,7 +139,7 @@ async def _opencode_catalog(config: OpenCodeConfig) -> dict:
                 }
             )
 
-    for project in project_response.json():
+    for project in projects:
         path = project.get("worktree") or project.get("directory")
         if path:
             item = _project(str(path), "OpenCode")
@@ -143,19 +147,39 @@ async def _opencode_catalog(config: OpenCodeConfig) -> dict:
                 item["name"] = str(project["name"])
             result["projects"].append(item)
 
-    for session in session_response.json():
-        time = session.get("time", {})
-        result["sessions"].append(
-            {
-                "id": str(session.get("id", "")),
-                "title": str(session.get("title") or "Untitled conversation"),
-                "workspace": str(
-                    session.get("directory") or config.workspace_directory
-                ),
+    sessions = {}
+    for directory, session_group in zip(directories, session_groups):
+        for session in session_group:
+            session_id = str(session.get("id", ""))
+            if not session_id:
+                continue
+            time = session.get("time", {})
+            sessions[session_id] = {
+                "id": session_id,
+                "title": _session_title(session.get("title")),
+                "workspace": str(session.get("directory") or directory),
                 "updated_at": time.get("updated") or time.get("created"),
+                "source": "opencode",
             }
-        )
+    result["sessions"] = sorted(
+        sessions.values(),
+        key=lambda session: session.get("updated_at") or 0,
+        reverse=True,
+    )
     return result
+
+
+async def _opencode_sessions(client: httpx.AsyncClient, directory: str) -> list:
+    try:
+        response = await client.get(
+            "/session",
+            params={"directory": directory, "limit": 10000},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, list) else []
+    except (httpx.HTTPError, ValueError):
+        return []
 
 
 async def _omlx_catalog() -> dict:
@@ -292,26 +316,30 @@ def _hermes_models() -> list[dict]:
     return models
 
 
-def _codex_sessions() -> list[dict]:
-    path = Path.home() / ".codex/state_5.sqlite"
+def _codex_sessions(home: Path | None = None) -> list[dict]:
+    path = (home or Path.home()) / ".codex/state_5.sqlite"
     return _sqlite_sessions(
         path,
         "SELECT id, COALESCE(NULLIF(title, ''), NULLIF(name, ''), "
         "NULLIF(first_user_message, ''), 'Untitled conversation'), cwd, "
-        "updated_at FROM threads WHERE archived = 0 "
-        "ORDER BY updated_at DESC LIMIT 50",
+        "updated_at, 'codex' FROM threads WHERE archived = 0 "
+        "ORDER BY updated_at DESC",
     )
 
 
-def _hermes_sessions() -> list[dict]:
-    path = Path.home() / ".hermes/state.db"
+def _hermes_sessions(home: Path | None = None) -> list[dict]:
+    path = (home or Path.home()) / ".hermes/state.db"
     return _sqlite_sessions(
         path,
-        "SELECT id, COALESCE(NULLIF(title, ''), NULLIF(display_name, ''), "
-        "'Untitled conversation'), COALESCE(cwd, ''), "
-        "COALESCE(last_activity_at, started_at) FROM sessions "
-        "WHERE archived = 0 AND hidden = 0 ORDER BY "
-        "COALESCE(last_activity_at, started_at) DESC LIMIT 50",
+        "SELECT sessions.id, COALESCE(NULLIF(title, ''), "
+        "NULLIF(display_name, ''), NULLIF(SUBSTR((SELECT content FROM messages "
+        "WHERE messages.session_id = sessions.id AND role = 'user' AND active = 1 "
+        "AND NULLIF(content, '') IS NOT NULL ORDER BY timestamp LIMIT 1), 1, 100), ''), "
+        "'Untitled conversation'), COALESCE(NULLIF(cwd, ''), "
+        "NULLIF(git_repo_root, ''), ''), COALESCE(last_activity_at, started_at), "
+        "source FROM sessions WHERE archived = 0 AND hidden = 0 "
+        "AND message_count > 0 AND source != 'subagent' ORDER BY "
+        "COALESCE(last_activity_at, started_at) DESC",
     )
 
 
@@ -324,9 +352,10 @@ def _sqlite_sessions(path: Path, query: str) -> list[dict]:
             return [
                 {
                     "id": row[0],
-                    "title": row[1],
+                    "title": _session_title(row[1]),
                     "workspace": row[2],
                     "updated_at": row[3],
+                    "source": row[4] if len(row) > 4 else "local",
                 }
                 for row in connection.execute(query).fetchall()
             ]
@@ -335,14 +364,14 @@ def _sqlite_sessions(path: Path, query: str) -> list[dict]:
     return []
 
 
-def _claude_sessions() -> list[dict]:
-    root = Path.home() / ".claude/projects"
+def _claude_sessions(home: Path | None = None) -> list[dict]:
+    root = (home or Path.home()) / ".claude/projects"
     if not root.is_dir():
         return []
     paths = list(root.glob("*/*.jsonl"))
     paths.sort(key=lambda item: item.stat().st_mtime, reverse=True)
     sessions = []
-    for path in paths[:50]:
+    for path in paths:
         title = "Untitled conversation"
         workspace = ""
         session_id = path.stem
@@ -371,6 +400,7 @@ def _claude_sessions() -> list[dict]:
                 "title": title,
                 "workspace": workspace,
                 "updated_at": path.stat().st_mtime,
+                "source": "claude_code",
             }
         )
     return sessions
@@ -383,6 +413,10 @@ def _project(path: str, source: str) -> dict:
         "path": resolved,
         "source": source,
     }
+
+
+def _session_title(value) -> str:
+    return " ".join(str(value or "").split())[:120] or "Untitled conversation"
 
 
 def _merge_models(*groups: list[dict]) -> list[dict]:

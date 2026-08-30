@@ -69,6 +69,7 @@ class LLMFactory:
                 provider_id=kwargs.get("provider_id"),
                 model=kwargs.get("model"),
                 agent=kwargs.get("agent"),
+                interaction_mode=kwargs.get("interaction_mode", "character"),
                 session_id=kwargs.get("session_id"),
                 workspace_directory=kwargs.get("workspace_directory"),
                 timeout=kwargs.get("timeout"),
@@ -90,10 +91,12 @@ class LLMFactory:
                 model=kwargs.get("model"),
                 provider=kwargs.get("provider"),
                 launch_mode=kwargs.get("launch_mode", "direct"),
+                interaction_mode=kwargs.get("interaction_mode", "character"),
                 session_id=kwargs.get("session_id", ""),
                 workspace_directory=kwargs.get("workspace_directory"),
                 timeout=kwargs.get("timeout"),
                 show_reasoning=kwargs.get("show_reasoning", False),
+                allow_tools=kwargs.get("allow_tools", False),
             )
 
         elif llm_provider == "llama_cpp_llm":

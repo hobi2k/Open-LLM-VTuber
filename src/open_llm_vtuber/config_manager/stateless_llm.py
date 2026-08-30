@@ -131,6 +131,9 @@ class OpenCodeConfig(StatelessLLMBaseConfig):
     provider_id: str = Field(..., alias="provider_id")
     model: str = Field(..., alias="model")
     agent: str = Field("vtuber", alias="agent")
+    interaction_mode: Literal["character", "coding"] = Field(
+        "character", alias="interaction_mode"
+    )
     launch_mode: Literal["direct", "omlx"] = Field("direct", alias="launch_mode")
     session_id: str = Field("", alias="session_id")
     workspace_directory: str = Field(".", alias="workspace_directory")
@@ -199,12 +202,16 @@ class CLIAgentConfig(StatelessLLMBaseConfig):
 
     executable: str = Field("auto", min_length=1, alias="executable")
     launch_mode: Literal["direct", "omlx"] = Field("direct", alias="launch_mode")
+    interaction_mode: Literal["character", "coding"] = Field(
+        "character", alias="interaction_mode"
+    )
     session_id: str = Field("", alias="session_id")
     model: str = Field("", alias="model")
     provider: str = Field("", alias="provider")
     workspace_directory: str = Field(".", min_length=1, alias="workspace_directory")
     timeout: float = Field(300, gt=0, alias="timeout")
     show_reasoning: bool = Field(False, alias="show_reasoning")
+    allow_tools: bool = Field(False, alias="allow_tools")
 
 
 class LmStudioConfig(OpenAICompatibleConfig):

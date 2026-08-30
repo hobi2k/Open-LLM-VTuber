@@ -27,12 +27,14 @@ RuntimeProvider = Literal[
 class CLISettingsUpdate(BaseModel):
     executable: str = Field(default="auto", min_length=1)
     launch_mode: Literal["direct", "omlx"] = "direct"
+    interaction_mode: Literal["character", "coding"] = "character"
     session_id: str = ""
     model: str = ""
     provider: str = ""
     workspace_directory: str = Field(default=".", min_length=1)
     timeout: float = Field(default=300, gt=0)
     show_reasoning: bool = False
+    allow_tools: bool = False
 
 
 class AgentRuntimeSettingsUpdate(BaseModel):
@@ -115,12 +117,14 @@ def _cli_payload(config: CLIAgentConfig) -> dict:
     return {
         "executable": config.executable,
         "launch_mode": config.launch_mode,
+        "interaction_mode": config.interaction_mode,
         "session_id": config.session_id,
         "model": config.model,
         "provider": config.provider,
         "workspace_directory": config.workspace_directory,
         "timeout": config.timeout,
         "show_reasoning": config.show_reasoning,
+        "allow_tools": config.allow_tools,
     }
 
 
@@ -151,6 +155,7 @@ async def runtime_settings_payload(context: ServiceContext) -> dict:
             "provider_id": opencode.provider_id,
             "model": opencode.model,
             "agent": opencode.agent,
+            "interaction_mode": opencode.interaction_mode,
             "launch_mode": opencode.launch_mode,
             "session_id": (
                 active_session_id if active == "opencode_llm" else opencode.session_id

@@ -120,6 +120,39 @@ class CLIAgentLLMTest(unittest.IsolatedAsyncioTestCase):
         arguments = json.loads(self.arguments.read_text(encoding="utf-8"))
         self.assertEqual(arguments[arguments.index("--provider") + 1], "omlx")
 
+    async def test_claude_coding_mode_uses_native_tools_without_persona(self):
+        llm = self._llm("claude_code", interaction_mode="coding", allow_tools=True)
+
+        await self._complete_with(llm)
+
+        arguments = json.loads(self.arguments.read_text(encoding="utf-8"))
+        self.assertEqual(arguments[arguments.index("--tools") + 1], "default")
+        self.assertEqual(
+            arguments[arguments.index("--permission-mode") + 1], "acceptEdits"
+        )
+        self.assertEqual(self.stdin.read_text(encoding="utf-8"), "Hello")
+
+    async def test_codex_coding_mode_uses_workspace_and_project_rules(self):
+        llm = self._llm("codex", interaction_mode="coding", allow_tools=True)
+
+        await self._complete_with(llm)
+
+        arguments = json.loads(self.arguments.read_text(encoding="utf-8"))
+        self.assertEqual(arguments[arguments.index("--sandbox") + 1], "workspace-write")
+        self.assertNotIn("--ignore-rules", arguments)
+        self.assertEqual(self.stdin.read_text(encoding="utf-8"), "Hello")
+
+    async def test_hermes_coding_mode_uses_native_tool_session(self):
+        llm = self._llm("hermes", interaction_mode="coding", allow_tools=True)
+
+        await self._complete_with(llm)
+
+        arguments = json.loads(self.arguments.read_text(encoding="utf-8"))
+        self.assertEqual(arguments[arguments.index("--source") + 1], "cli")
+        self.assertNotIn("--ignore-rules", arguments)
+        self.assertNotIn("--toolsets", arguments)
+        self.assertEqual(arguments[arguments.index("--query") + 1], "Hello")
+
     async def test_claude_resumes_persisted_session_with_latest_message_only(self):
         llm = self._llm("claude_code")
         await self._complete_with(llm)
@@ -250,7 +283,15 @@ class CLIAgentLLMTest(unittest.IsolatedAsyncioTestCase):
     async def _complete(self, runtime, model="", provider=""):
         return await self._complete_with(self._llm(runtime, model, provider))
 
-    def _llm(self, runtime, model="", provider="", show_reasoning=False):
+    def _llm(
+        self,
+        runtime,
+        model="",
+        provider="",
+        show_reasoning=False,
+        interaction_mode="character",
+        allow_tools=False,
+    ):
         return CLIAgentLLM(
             runtime=runtime,
             executable=str(self.executable),
@@ -259,6 +300,8 @@ class CLIAgentLLMTest(unittest.IsolatedAsyncioTestCase):
             workspace_directory=str(self.directory),
             timeout=5,
             show_reasoning=show_reasoning,
+            interaction_mode=interaction_mode,
+            allow_tools=allow_tools,
         )
 
     async def _complete_with(self, llm):

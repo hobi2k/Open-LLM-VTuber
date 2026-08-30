@@ -51,6 +51,7 @@ class OpenCodeSettingsTest(unittest.TestCase):
                 provider_id="test-provider",
                 model="test-model",
                 agent="test-agent",
+                interaction_mode="coding",
                 workspace_directory="/tmp/test-workspace",
                 timeout=42,
                 keep_sessions=True,
@@ -78,6 +79,10 @@ class OpenCodeSettingsTest(unittest.TestCase):
             self.assertTrue(
                 agent_config["llm_configs"]["opencode_llm"]["show_reasoning"]
             )
+            self.assertEqual(
+                agent_config["llm_configs"]["opencode_llm"]["interaction_mode"],
+                "coding",
+            )
 
     def test_persists_each_cli_runtime_and_selected_provider(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -88,6 +93,8 @@ class OpenCodeSettingsTest(unittest.TestCase):
                 model="test-model",
                 workspace_directory="/tmp",
                 timeout=45,
+                interaction_mode="coding",
+                allow_tools=True,
             )
             settings = AgentRuntimeSettingsUpdate(
                 provider="hermes_cli_llm",
@@ -125,6 +132,13 @@ class OpenCodeSettingsTest(unittest.TestCase):
             self.assertEqual(
                 agent_config["llm_configs"]["hermes_cli_llm"]["provider"],
                 "test-provider",
+            )
+            self.assertEqual(
+                agent_config["llm_configs"]["codex_cli_llm"]["interaction_mode"],
+                "coding",
+            )
+            self.assertTrue(
+                agent_config["llm_configs"]["claude_code_llm"]["allow_tools"]
             )
             validate_config(saved)
 

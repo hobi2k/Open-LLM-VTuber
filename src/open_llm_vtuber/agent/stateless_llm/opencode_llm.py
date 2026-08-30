@@ -25,6 +25,7 @@ class OpenCodeLLM(StatelessLLMInterface):
         provider_id: str,
         model: str,
         agent: str = "vtuber",
+        interaction_mode: str = "character",
         session_id: str = "",
         workspace_directory: str = ".",
         timeout: float = 300,
@@ -38,6 +39,7 @@ class OpenCodeLLM(StatelessLLMInterface):
         self.provider_id = provider_id
         self.model = model
         self.agent = agent
+        self.interaction_mode = interaction_mode
         self.session_id = session_id
         self.workspace_directory = str(Path(workspace_directory).expanduser().resolve())
         self.timeout = timeout
@@ -87,7 +89,10 @@ class OpenCodeLLM(StatelessLLMInterface):
                 if not session_id:
                     session_id = await self._create_session(client)
                     self.session_id = session_id
-                prompt_parts = self._build_prompt_parts(messages, continuing)
+                prompt_parts = self._build_prompt_parts(
+                    messages,
+                    continuing or self.interaction_mode == "coding",
+                )
 
                 async with client.stream(
                     "GET",
@@ -101,7 +106,7 @@ class OpenCodeLLM(StatelessLLMInterface):
                         client,
                         session_id,
                         prompt_parts,
-                        system,
+                        system if self.interaction_mode == "character" else None,
                     )
 
                     emitted_text = False
@@ -146,8 +151,16 @@ class OpenCodeLLM(StatelessLLMInterface):
 
     async def _create_session(self, client: httpx.AsyncClient) -> str:
         payload: Dict[str, Any] = {
-            "title": "Open-LLM-VTuber conversation",
-            "agent": self.agent,
+            "title": (
+                "Open-LLM coding session"
+                if self.interaction_mode == "coding"
+                else "Open-LLM-VTuber conversation"
+            ),
+            "agent": (
+                "build"
+                if self.interaction_mode == "coding" and self.agent == "vtuber"
+                else self.agent
+            ),
             "model": {"providerID": self.provider_id, "id": self.model},
         }
         if not self.allow_tools:
@@ -175,7 +188,11 @@ class OpenCodeLLM(StatelessLLMInterface):
     ) -> None:
         payload: Dict[str, Any] = {
             "model": {"providerID": self.provider_id, "modelID": self.model},
-            "agent": self.agent,
+            "agent": (
+                "build"
+                if self.interaction_mode == "coding" and self.agent == "vtuber"
+                else self.agent
+            ),
             "parts": parts,
         }
         if system:

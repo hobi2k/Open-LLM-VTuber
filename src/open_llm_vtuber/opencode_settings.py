@@ -19,6 +19,7 @@ class OpenCodeSettingsUpdate(BaseModel):
     provider_id: str = Field(min_length=1)
     model: str = Field(min_length=1)
     agent: str = Field(default="vtuber", min_length=1)
+    interaction_mode: Literal["character", "coding"] = "character"
     launch_mode: Literal["direct", "omlx"] = "direct"
     session_id: str = ""
     workspace_directory: str = Field(default=".", min_length=1)
@@ -52,6 +53,7 @@ def settings_payload(context: ServiceContext) -> dict:
         "provider_id": config.provider_id,
         "model": config.model,
         "agent": config.agent,
+        "interaction_mode": config.interaction_mode,
         "launch_mode": config.launch_mode,
         "session_id": config.session_id,
         "workspace_directory": config.workspace_directory,

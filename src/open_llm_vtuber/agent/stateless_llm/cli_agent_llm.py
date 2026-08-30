@@ -24,20 +24,24 @@ class CLIAgentLLM(StatelessLLMInterface):
         model: str = "",
         provider: str = "",
         launch_mode: str = "direct",
+        interaction_mode: str = "character",
         session_id: str = "",
         workspace_directory: str = ".",
         timeout: float = 300,
         show_reasoning: bool = False,
+        allow_tools: bool = False,
     ):
         self.runtime = runtime
         self.executable = self._resolve_executable(executable)
         self.model = model
         self.provider = provider
         self.launch_mode = launch_mode
+        self.interaction_mode = interaction_mode
         self.session_id = session_id
         self.workspace_directory = str(Path(workspace_directory).expanduser().resolve())
         self.timeout = timeout
         self.show_reasoning = show_reasoning
+        self.allow_tools = allow_tools
         self.support_tools = False
 
     async def chat_completion(
@@ -51,7 +55,7 @@ class CLIAgentLLM(StatelessLLMInterface):
 
         prompt = (
             self._latest_user_text(messages)
-            if self.session_id
+            if self.session_id or self.interaction_mode == "coding"
             else self._build_prompt(messages, system)
         )
         command, stdin = self._command(prompt)
@@ -170,11 +174,13 @@ class CLIAgentLLM(StatelessLLMInterface):
                 "-p",
                 "--output-format",
                 "stream-json" if self.show_reasoning else "json",
-                "--tools",
-                "",
-                "--permission-mode",
-                "dontAsk",
             ]
+            if self.allow_tools:
+                command.extend(
+                    ["--tools", "default", "--permission-mode", "acceptEdits"]
+                )
+            else:
+                command.extend(["--tools", "", "--permission-mode", "dontAsk"])
             if self.show_reasoning:
                 command.extend(["--include-partial-messages", "--verbose"])
             if self.session_id:
@@ -194,10 +200,13 @@ class CLIAgentLLM(StatelessLLMInterface):
                     "resume",
                     "--json",
                     "--skip-git-repo-check",
-                    "--ignore-rules",
                     "-c",
-                    'sandbox_mode="read-only"',
+                    'sandbox_mode="workspace-write"'
+                    if self.allow_tools
+                    else 'sandbox_mode="read-only"',
                 ]
+                if self.interaction_mode != "coding":
+                    command.append("--ignore-rules")
             else:
                 command = [
                     self.executable,
@@ -206,10 +215,11 @@ class CLIAgentLLM(StatelessLLMInterface):
                     "--color",
                     "never",
                     "--sandbox",
-                    "read-only",
+                    "workspace-write" if self.allow_tools else "read-only",
                     "--skip-git-repo-check",
-                    "--ignore-rules",
                 ]
+                if self.interaction_mode != "coding":
+                    command.append("--ignore-rules")
             if self.model:
                 command.extend(["--model", self.model])
             if self.session_id:
@@ -224,14 +234,15 @@ class CLIAgentLLM(StatelessLLMInterface):
                 "--query",
                 prompt,
                 "--quiet",
-                "--ignore-rules",
-                "--toolsets",
-                "",
                 "--source",
-                "tool",
-                "--max-turns",
-                "1",
+                "cli" if self.interaction_mode == "coding" else "tool",
             ]
+            if self.allow_tools:
+                command.extend(["--max-turns", "50"])
+            else:
+                if self.interaction_mode != "coding":
+                    command.append("--ignore-rules")
+                command.extend(["--toolsets", "", "--max-turns", "1"])
             if self.session_id:
                 command.extend(["--resume", self.session_id, "--no-restore-cwd"])
             if self.model:

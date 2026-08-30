@@ -287,6 +287,54 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn("permission", session_request)
 
+    async def test_coding_mode_uses_build_agent_without_character_prompt(self):
+        llm = self._llm(interaction_mode="coding", allow_tools=True)
+        _ = [
+            chunk
+            async for chunk in llm.chat_completion(
+                [
+                    {"role": "assistant", "content": "Character reply"},
+                    {"role": "user", "content": "Fix this project"},
+                ],
+                system="Character prompt",
+            )
+        ]
+
+        session_request = next(
+            body
+            for method, path, body in OpenCodeHandler.requests
+            if method == "POST" and path == "/session"
+        )
+        self.assertEqual(session_request["agent"], "build")
+        self.assertNotIn("permission", session_request)
+        prompt_request = next(
+            body
+            for method, path, body in OpenCodeHandler.requests
+            if method == "POST" and path.endswith("/prompt_async")
+        )
+        self.assertEqual(prompt_request["agent"], "build")
+        self.assertNotIn("system", prompt_request)
+        self.assertEqual(prompt_request["parts"][0]["text"], "Fix this project")
+
+    async def test_coding_mode_can_keep_tools_disabled(self):
+        llm = self._llm(interaction_mode="coding", allow_tools=False)
+        _ = [
+            chunk
+            async for chunk in llm.chat_completion(
+                [{"role": "user", "content": "Review this project"}]
+            )
+        ]
+
+        session_request = next(
+            body
+            for method, path, body in OpenCodeHandler.requests
+            if method == "POST" and path == "/session"
+        )
+        self.assertEqual(
+            session_request["permission"],
+            [{"permission": "*", "pattern": "*", "action": "deny"}],
+        )
+
     async def test_interrupted_prompt_finishes_without_error_or_second_abort(self):
         OpenCodeHandler.assistant_error = {
             "name": "MessageAbortedError",
@@ -311,8 +359,14 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(config.keep_sessions)
         self.assertEqual(config.agent, "vtuber")
         self.assertEqual(config.executable, "auto")
+        self.assertEqual(config.interaction_mode, "character")
 
-    def _llm(self, allow_tools=False, show_reasoning=False):
+    def _llm(
+        self,
+        allow_tools=False,
+        show_reasoning=False,
+        interaction_mode="character",
+    ):
         return OpenCodeLLM(
             base_url=f"http://127.0.0.1:{self.server.server_port}",
             provider_id="omlx",
@@ -322,6 +376,7 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
             timeout=5,
             allow_tools=allow_tools,
             show_reasoning=show_reasoning,
+            interaction_mode=interaction_mode,
         )
 
 
