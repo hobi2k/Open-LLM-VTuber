@@ -230,6 +230,47 @@ class CLIAgentLLMTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(activities[1]["output"], "/tmp/project")
         self.assertIn("+new", activities[2]["diff"])
 
+    async def test_codex_accepts_large_single_line_tool_results(self):
+        self.executable.write_text(
+            textwrap.dedent(
+                """\
+                #!/usr/bin/env python3
+                import json
+
+                print(json.dumps({
+                    "type": "item.completed",
+                    "item": {
+                        "id": "large-tool",
+                        "type": "tool_call",
+                        "name": "browser",
+                        "result": {
+                            "content": [{"type": "text", "text": "x" * 100_000}],
+                        },
+                    },
+                }))
+                print(json.dumps({
+                    "type": "item.completed",
+                    "item": {"type": "agent_message", "text": "Large result handled"},
+                }))
+                """
+            ),
+            encoding="utf-8",
+        )
+        os.chmod(self.executable, 0o755)
+
+        chunks = await self._chunks(
+            self._llm("codex", interaction_mode="coding", allow_tools=True)
+        )
+        activities = [
+            chunk
+            for chunk in chunks
+            if isinstance(chunk, dict) and chunk.get("type") == "agent-activity"
+        ]
+
+        self.assertEqual("".join(chunk for chunk in chunks if isinstance(chunk, str)), "Large result handled")
+        self.assertEqual(len(activities), 1)
+        self.assertLessEqual(len(activities[0]["output"]), 6_100)
+
     async def test_hermes_coding_mode_uses_native_tool_session(self):
         llm = self._llm("hermes", interaction_mode="coding", allow_tools=True)
 
