@@ -1,5 +1,4 @@
 import asyncio
-import shutil
 from pathlib import Path
 from typing import Iterable, Literal
 
@@ -8,6 +7,11 @@ from pydantic import BaseModel, Field
 
 from .config_manager import validate_config
 from .config_manager.stateless_llm import CLIAgentConfig, OpenCodeConfig
+from .executable_utils import (
+    executable_environment,
+    executable_version,
+    resolve_executable,
+)
 from .opencode_settings import (
     OpenCodeSettingsUpdate,
     connection_payload as opencode_connection_payload,
@@ -56,15 +60,10 @@ def _cli_config(context: ServiceContext, name: RuntimeProvider) -> CLIAgentConfi
 
 
 async def _cli_connection_payload(config: CLIAgentConfig, runtime: str) -> dict:
-    configured = str(config.executable or "auto").strip()
-    executable = str(Path(configured).expanduser())
-    resolved = None if configured in {"", "auto"} else shutil.which(executable)
-    if configured not in {"", "auto"} and not resolved and Path(executable).is_file():
-        resolved = executable
-    if configured in {"", "auto"}:
-        resolved = shutil.which(
-            {"claude_code": "claude", "codex": "codex", "hermes": "hermes"}[runtime]
-        )
+    resolved = resolve_executable(
+        config.executable,
+        {"claude_code": "claude", "codex": "codex", "hermes": "hermes"}[runtime],
+    )
     workspace = Path(config.workspace_directory).expanduser()
     if not resolved:
         return {
@@ -86,6 +85,7 @@ async def _cli_connection_payload(config: CLIAgentConfig, runtime: str) -> dict:
             resolved,
             "--version",
             cwd=str(workspace),
+            env=executable_environment(),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
@@ -101,7 +101,7 @@ async def _cli_connection_payload(config: CLIAgentConfig, runtime: str) -> dict:
         return {
             "available": True,
             "path": resolved,
-            "version": output.splitlines()[0] if output else None,
+            "version": executable_version(output),
             "error": None,
         }
     except (OSError, asyncio.TimeoutError) as error:

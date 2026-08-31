@@ -3,7 +3,6 @@
 import asyncio
 import json
 import os
-import shutil
 import sqlite3
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Union
@@ -11,6 +10,7 @@ from uuid import uuid4
 
 from loguru import logger
 
+from ...executable_utils import executable_environment, resolve_executable
 from .stateless_llm_interface import StatelessLLMInterface
 
 
@@ -70,6 +70,7 @@ class CLIAgentLLM(StatelessLLMInterface):
             process = await asyncio.create_subprocess_exec(
                 *command,
                 cwd=self.workspace_directory,
+                env=executable_environment(),
                 stdin=asyncio.subprocess.PIPE
                 if stdin is not None
                 else asyncio.subprocess.DEVNULL,
@@ -518,17 +519,12 @@ class CLIAgentLLM(StatelessLLMInterface):
         return ""
 
     def _resolve_executable(self, executable: str) -> str:
-        configured = str(executable or "auto").strip()
-        if configured not in {"", "auto"}:
-            expanded = str(Path(configured).expanduser())
-            return shutil.which(expanded) or expanded
-
         command = {
             "claude_code": "claude",
             "codex": "codex",
             "hermes": "hermes",
         }.get(self.runtime, self.runtime)
-        return shutil.which(command) or command
+        return resolve_executable(executable, command) or command
 
     @staticmethod
     def _content_text(content: Any) -> str:

@@ -1,6 +1,5 @@
 import asyncio
 import ipaddress
-import shutil
 from pathlib import Path
 from typing import Iterable, Literal
 
@@ -10,6 +9,11 @@ from pydantic import BaseModel, Field
 
 from .config_manager import validate_config
 from .config_manager.stateless_llm import OpenCodeConfig
+from .executable_utils import (
+    executable_environment,
+    executable_version,
+    resolve_executable,
+)
 from .service_context import ServiceContext
 
 
@@ -104,13 +108,7 @@ async def connection_payload(config: OpenCodeConfig) -> dict:
 
 
 async def opencode_executable_payload(config: OpenCodeConfig) -> dict:
-    configured = str(config.executable or "auto").strip()
-    expanded = str(Path(configured).expanduser())
-    resolved = shutil.which("opencode") if configured in {"", "auto"} else None
-    if configured not in {"", "auto"}:
-        resolved = shutil.which(expanded)
-        if not resolved and Path(expanded).is_file():
-            resolved = expanded
+    resolved = resolve_executable(config.executable, "opencode")
     if not resolved:
         return {
             "available": False,
@@ -125,6 +123,7 @@ async def opencode_executable_payload(config: OpenCodeConfig) -> dict:
             resolved,
             "--version",
             cwd=str(Path(config.workspace_directory).expanduser()),
+            env=executable_environment(),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
@@ -140,7 +139,7 @@ async def opencode_executable_payload(config: OpenCodeConfig) -> dict:
         return {
             "available": True,
             "path": resolved,
-            "version": output.splitlines()[0] if output else None,
+            "version": executable_version(output),
             "error": None,
         }
     except (OSError, asyncio.TimeoutError) as error:
