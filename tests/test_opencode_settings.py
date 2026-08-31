@@ -15,6 +15,11 @@ from open_llm_vtuber.opencode_settings import (
     require_loopback_client,
     settings_payload,
 )
+from open_llm_vtuber.opencode_runtime import (
+    _parse_listener_urls,
+    discover_or_start_opencode,
+)
+from open_llm_vtuber.config_manager.stateless_llm import OpenCodeConfig
 from open_llm_vtuber.agent_runtime_settings import (
     AgentRuntimeSettingsUpdate,
     CLISettingsUpdate,
@@ -179,6 +184,58 @@ class OpenCodeSettingsTest(unittest.TestCase):
             self.assertIsNotNone(llm_configs.codex_cli_llm, path)
             self.assertIsNotNone(llm_configs.hermes_cli_llm, path)
 
+
+class OpenCodeRuntimeTest(unittest.IsolatedAsyncioTestCase):
+    def test_parses_random_opencode_listener_ports(self):
+        output = "\n".join(
+            [
+                "p100",
+                "cOpenCode",
+                "n127.0.0.1:54329",
+                "p200",
+                "cpython3",
+                "n127.0.0.1:8005",
+                "p300",
+                "copencode",
+                "n*:4096",
+            ]
+        )
+
+        self.assertEqual(
+            _parse_listener_urls(output),
+            ["http://127.0.0.1:54329", "http://127.0.0.1:4096"],
+        )
+
+    async def test_discovers_running_server_without_a_configured_port(self):
+        detected = "http://127.0.0.1:54329"
+        config = OpenCodeConfig(
+            base_url="http://127.0.0.1:1",
+            workspace_directory="/tmp",
+            provider_id="test",
+            model="test",
+        )
+        with (
+            patch(
+                "open_llm_vtuber.opencode_runtime._listener_urls",
+                new=AsyncMock(return_value=[detected]),
+            ),
+            patch(
+                "open_llm_vtuber.opencode_runtime._health",
+                new=AsyncMock(
+                    side_effect=[None, {"healthy": True, "version": "test"}]
+                ),
+            ),
+        ):
+            result = await discover_or_start_opencode(
+                config,
+                executable=None,
+                auto_start=False,
+            )
+
+        self.assertTrue(result["connected"])
+        self.assertEqual(result["base_url"], detected)
+        self.assertEqual(result["source"], "detected")
+        self.assertFalse(result["managed"])
 
 class AgentRuntimeSettingsPayloadTest(unittest.IsolatedAsyncioTestCase):
     async def test_loading_settings_does_not_probe_runtimes(self):

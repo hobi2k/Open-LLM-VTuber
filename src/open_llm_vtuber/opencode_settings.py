@@ -14,6 +14,7 @@ from .executable_utils import (
     executable_version,
     resolve_executable,
 )
+from .opencode_runtime import discover_or_start_opencode
 from .service_context import ServiceContext
 
 
@@ -88,6 +89,9 @@ async def connection_payload(config: OpenCodeConfig) -> dict:
             payload = response.json()
             return {
                 "connected": payload.get("healthy") is True,
+                "base_url": config.base_url.rstrip("/"),
+                "source": "configured",
+                "managed": False,
                 "version": payload.get("version"),
                 "path": executable["path"],
                 "executable_available": executable["available"],
@@ -98,6 +102,9 @@ async def connection_payload(config: OpenCodeConfig) -> dict:
     except (httpx.HTTPError, ValueError) as error:
         return {
             "connected": False,
+            "base_url": config.base_url.rstrip("/"),
+            "source": None,
+            "managed": False,
             "version": None,
             "path": executable["path"],
             "executable_available": executable["available"],
@@ -105,6 +112,26 @@ async def connection_payload(config: OpenCodeConfig) -> dict:
             "executable_error": executable["error"],
             "error": str(error),
         }
+
+
+async def discover_connection_payload(
+    config: OpenCodeConfig,
+    *,
+    auto_start: bool,
+) -> dict:
+    executable = await opencode_executable_payload(config)
+    runtime = await discover_or_start_opencode(
+        config,
+        executable["path"],
+        auto_start=auto_start,
+    )
+    return {
+        **runtime,
+        "path": executable["path"],
+        "executable_available": executable["available"],
+        "executable_version": executable["version"],
+        "executable_error": executable["error"],
+    }
 
 
 async def opencode_executable_payload(config: OpenCodeConfig) -> dict:

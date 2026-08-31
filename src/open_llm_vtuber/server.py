@@ -15,6 +15,7 @@ from starlette.responses import Response
 from starlette.staticfiles import StaticFiles as StarletteStaticFiles
 
 from .routes import init_client_ws_route, init_webtool_routes, init_proxy_route
+from .opencode_runtime import stop_managed_opencode
 from .service_context import ServiceContext
 from .config_manager.utils import Config
 
@@ -73,6 +74,7 @@ class WebSocketServer:
 
     def __init__(self, config: Config, default_context_cache: ServiceContext = None):
         self.app = FastAPI(title="Open-LLM-VTuber Server")  # Added title for clarity
+        self.app.add_event_handler("shutdown", stop_managed_opencode)
         self.config = config
         self.default_context_cache = (
             default_context_cache or ServiceContext()
