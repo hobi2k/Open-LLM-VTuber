@@ -78,6 +78,66 @@ class OpenCodeHandler(BaseHTTPRequestHandler):
                 {
                     "sessionID": "ses_test",
                     "part": {
+                        "id": "tool-command",
+                        "callID": "call-command",
+                        "messageID": "msg_assistant",
+                        "type": "tool",
+                        "tool": "bash",
+                        "state": {
+                            "status": "running",
+                            "input": {"command": "pwd"},
+                            "title": "pwd",
+                        },
+                    },
+                },
+            )
+            self._event(
+                "message.part.updated",
+                {
+                    "sessionID": "ses_test",
+                    "part": {
+                        "id": "tool-command",
+                        "callID": "call-command",
+                        "messageID": "msg_assistant",
+                        "type": "tool",
+                        "tool": "bash",
+                        "state": {
+                            "status": "completed",
+                            "input": {"command": "pwd"},
+                            "title": "pwd",
+                            "output": "/tmp/project",
+                            "metadata": {},
+                        },
+                    },
+                },
+            )
+            self._event(
+                "message.part.updated",
+                {
+                    "sessionID": "ses_test",
+                    "part": {
+                        "id": "tool-edit",
+                        "callID": "call-edit",
+                        "messageID": "msg_assistant",
+                        "type": "tool",
+                        "tool": "edit",
+                        "state": {
+                            "status": "completed",
+                            "input": {"filePath": "src/app.ts"},
+                            "title": "src/app.ts",
+                            "output": "Edit applied successfully.",
+                            "metadata": {
+                                "diff": "@@ -1 +1 @@\n-old\n+new"
+                            },
+                        },
+                    },
+                },
+            )
+            self._event(
+                "message.part.updated",
+                {
+                    "sessionID": "ses_test",
+                    "part": {
                         "id": "text",
                         "messageID": "msg_assistant",
                         "type": "text",
@@ -334,6 +394,32 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
             session_request["permission"],
             [{"permission": "*", "pattern": "*", "action": "deny"}],
         )
+
+    async def test_coding_mode_streams_command_and_file_activity(self):
+        chunks = [
+            chunk
+            async for chunk in self._llm(
+                interaction_mode="coding",
+                allow_tools=True,
+            ).chat_completion([{"role": "user", "content": "Fix the project"}])
+        ]
+
+        activities = [
+            chunk
+            for chunk in chunks
+            if isinstance(chunk, dict) and chunk.get("type") == "agent-activity"
+        ]
+        self.assertEqual(
+            [(item["activity_kind"], item["status"]) for item in activities],
+            [
+                ("command", "running"),
+                ("command", "completed"),
+                ("file", "completed"),
+            ],
+        )
+        self.assertEqual(activities[1]["output"], "/tmp/project")
+        self.assertEqual(activities[2]["path"], "src/app.ts")
+        self.assertIn("+new", activities[2]["diff"])
 
     async def test_interrupted_prompt_finishes_without_error_or_second_abort(self):
         OpenCodeHandler.assistant_error = {

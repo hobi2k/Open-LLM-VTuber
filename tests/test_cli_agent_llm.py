@@ -41,6 +41,23 @@ class CLIAgentLLMTest(unittest.IsolatedAsyncioTestCase):
                             }},
                         }}))
                         print(json.dumps({{
+                            "type": "assistant",
+                            "message": {{"content": [{{
+                                "type": "tool_use",
+                                "id": "claude-command",
+                                "name": "Bash",
+                                "input": {{"command": "printf test"}},
+                            }}]}},
+                        }}))
+                        print(json.dumps({{
+                            "type": "user",
+                            "message": {{"content": [{{
+                                "type": "tool_result",
+                                "tool_use_id": "claude-command",
+                                "content": "test",
+                            }}]}},
+                        }}))
+                        print(json.dumps({{
                             "type": "result",
                             "result": "Claude response",
                             "session_id": "11111111-1111-1111-1111-111111111111",
@@ -55,6 +72,39 @@ class CLIAgentLLMTest(unittest.IsolatedAsyncioTestCase):
                     print(json.dumps({{
                         "type": "item.completed",
                         "item": {{"type": "reasoning", "text": "Codex reasoning"}},
+                    }}))
+                    print(json.dumps({{
+                        "type": "item.started",
+                        "item": {{
+                            "id": "codex-command",
+                            "type": "command_execution",
+                            "command": "/bin/zsh -lc pwd",
+                            "status": "in_progress",
+                        }},
+                    }}))
+                    print(json.dumps({{
+                        "type": "item.completed",
+                        "item": {{
+                            "id": "codex-command",
+                            "type": "command_execution",
+                            "command": "/bin/zsh -lc pwd",
+                            "aggregated_output": "/tmp/project",
+                            "exit_code": 0,
+                            "status": "completed",
+                        }},
+                    }}))
+                    print(json.dumps({{
+                        "type": "item.completed",
+                        "item": {{
+                            "id": "codex-file",
+                            "type": "file_change",
+                            "status": "completed",
+                            "changes": [{{
+                                "path": "src/app.ts",
+                                "kind": "update",
+                                "diff": "@@ -1 +1 @@\\n-old\\n+new",
+                            }}],
+                        }},
                     }}))
                     print(json.dumps({{
                         "type": "item.completed",
@@ -142,6 +192,44 @@ class CLIAgentLLMTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("--ignore-rules", arguments)
         self.assertEqual(self.stdin.read_text(encoding="utf-8"), "Hello")
 
+    async def test_claude_coding_mode_streams_command_activity(self):
+        chunks = await self._chunks(
+            self._llm("claude_code", interaction_mode="coding", allow_tools=True)
+        )
+
+        activities = [
+            chunk
+            for chunk in chunks
+            if isinstance(chunk, dict) and chunk.get("type") == "agent-activity"
+        ]
+        self.assertEqual(
+            [(item["activity_kind"], item["status"]) for item in activities],
+            [("command", "running"), ("command", "completed")],
+        )
+        self.assertEqual(activities[-1]["command"], "printf test")
+        self.assertEqual(activities[-1]["output"], "test")
+
+    async def test_codex_coding_mode_streams_command_and_diff_activity(self):
+        chunks = await self._chunks(
+            self._llm("codex", interaction_mode="coding", allow_tools=True)
+        )
+
+        activities = [
+            chunk
+            for chunk in chunks
+            if isinstance(chunk, dict) and chunk.get("type") == "agent-activity"
+        ]
+        self.assertEqual(
+            [(item["activity_kind"], item["status"]) for item in activities],
+            [
+                ("command", "running"),
+                ("command", "completed"),
+                ("file", "completed"),
+            ],
+        )
+        self.assertEqual(activities[1]["output"], "/tmp/project")
+        self.assertIn("+new", activities[2]["diff"])
+
     async def test_hermes_coding_mode_uses_native_tool_session(self):
         llm = self._llm("hermes", interaction_mode="coding", allow_tools=True)
 
@@ -152,6 +240,122 @@ class CLIAgentLLMTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("--ignore-rules", arguments)
         self.assertNotIn("--toolsets", arguments)
         self.assertEqual(arguments[arguments.index("--query") + 1], "Hello")
+
+    def test_hermes_restores_command_and_patch_activity_from_session(self):
+        database = self.directory / "state.db"
+        connection = sqlite3.connect(database)
+        connection.execute(
+            """
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY,
+                session_id TEXT,
+                role TEXT,
+                content TEXT,
+                tool_call_id TEXT,
+                tool_calls TEXT,
+                tool_name TEXT,
+                active INTEGER
+            )
+            """
+        )
+        connection.executemany(
+            """
+            INSERT INTO messages (
+                id, session_id, role, content, tool_call_id,
+                tool_calls, tool_name, active
+            ) VALUES (?, 'hermes-test', ?, ?, ?, ?, ?, 1)
+            """,
+            [
+                (
+                    1,
+                    "assistant",
+                    "",
+                    None,
+                    json.dumps(
+                        [
+                            {
+                                "call_id": "call-terminal",
+                                "function": {
+                                    "name": "terminal",
+                                    "arguments": json.dumps({"command": "pwd"}),
+                                },
+                            }
+                        ]
+                    ),
+                    None,
+                ),
+                (
+                    2,
+                    "tool",
+                    json.dumps({"output": "/tmp/project", "exit_code": 0}),
+                    "call-terminal",
+                    None,
+                    "terminal",
+                ),
+                (
+                    3,
+                    "assistant",
+                    "",
+                    None,
+                    json.dumps(
+                        [
+                            {
+                                "call_id": "call-patch",
+                                "function": {
+                                    "name": "patch",
+                                    "arguments": json.dumps(
+                                        {
+                                            "path": "src/app.py",
+                                            "old_string": "old",
+                                            "new_string": "new",
+                                        }
+                                    ),
+                                },
+                            }
+                        ]
+                    ),
+                    None,
+                ),
+                (
+                    4,
+                    "tool",
+                    json.dumps(
+                        {
+                            "success": True,
+                            "diff": "@@ -1 +1 @@\n-old\n+new",
+                        }
+                    ),
+                    "call-patch",
+                    None,
+                    "patch",
+                ),
+            ],
+        )
+        connection.commit()
+        connection.close()
+        previous_home = os.environ.get("HERMES_HOME")
+        os.environ["HERMES_HOME"] = str(self.directory)
+        try:
+            llm = self._llm("hermes", interaction_mode="coding", allow_tools=True)
+            llm.session_id = "hermes-test"
+            activities = llm._hermes_activity_events(0)
+        finally:
+            if previous_home is None:
+                os.environ.pop("HERMES_HOME", None)
+            else:
+                os.environ["HERMES_HOME"] = previous_home
+
+        self.assertEqual(
+            [(item["activity_kind"], item["status"]) for item in activities],
+            [
+                ("command", "running"),
+                ("command", "completed"),
+                ("file", "running"),
+                ("file", "completed"),
+            ],
+        )
+        self.assertEqual(activities[1]["output"], "/tmp/project")
+        self.assertIn("+new", activities[-1]["diff"])
 
     async def test_claude_resumes_persisted_session_with_latest_message_only(self):
         llm = self._llm("claude_code")

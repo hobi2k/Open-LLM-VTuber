@@ -9,6 +9,7 @@ from typing import Any, AsyncIterator, Dict, List, Union
 import httpx
 from loguru import logger
 
+from .agent_activity import tool_activity
 from .stateless_llm_interface import StatelessLLMInterface
 
 
@@ -248,10 +249,12 @@ class OpenCodeLLM(StatelessLLMInterface):
             if event.get("type") == "message.part.updated":
                 part = properties.get("part", {})
                 part_type = part.get("type")
-                if part.get("messageID") in assistant_messages and part_type in {
-                    "text",
-                    "reasoning",
-                }:
+                if part.get("messageID") not in assistant_messages:
+                    continue
+                if part_type == "tool" and self.interaction_mode == "coding":
+                    yield self._tool_activity(part)
+                    continue
+                if part_type in {"text", "reasoning"}:
                     part_id = part.get("id")
                     if not part_id:
                         continue
@@ -322,6 +325,23 @@ class OpenCodeLLM(StatelessLLMInterface):
             "reasoning_id": part_id,
             "text": text,
         }
+
+    @staticmethod
+    def _tool_activity(part: dict) -> dict:
+        state = part.get("state", {})
+        metadata = state.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = part.get("metadata")
+        return tool_activity(
+            activity_id=part.get("callID") or part.get("id") or "opencode-tool",
+            tool_name=str(part.get("tool") or "tool"),
+            status=str(state.get("status") or "running"),
+            input_data=state.get("input"),
+            title=str(state.get("title") or ""),
+            output=state.get("output"),
+            error=state.get("error"),
+            metadata=metadata,
+        )
 
     @staticmethod
     def _parse_event(line: str) -> Dict[str, Any] | None:
