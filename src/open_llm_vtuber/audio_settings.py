@@ -1,16 +1,20 @@
+import gc
+import sys
 from pathlib import Path
 from typing import Iterable
 
 import yaml
 from pydantic import BaseModel, Field
 
-from .config_manager import TTSConfig, validate_config
+from .config_manager import ASRConfig, TTSConfig, validate_config
 from .service_context import ServiceContext
 
 
 class TTSSettingsUpdate(BaseModel):
     engine: str = Field(min_length=1)
     voice: str | None = None
+    asr_enabled: bool | None = None
+    tts_enabled: bool | None = None
 
 
 def audio_settings_payload(context: ServiceContext) -> dict:
@@ -51,6 +55,8 @@ def audio_settings_payload(context: ServiceContext) -> dict:
     }
     return {
         "tts": {
+            "enabled": tts_config.enabled,
+            "loaded": context.tts_engine is not None,
             "engine": tts_engine,
             "available_engines": list(available_engines),
             "engines": available_engines,
@@ -66,6 +72,8 @@ def audio_settings_payload(context: ServiceContext) -> dict:
             ),
         },
         "asr": {
+            "enabled": asr_config.enabled,
+            "loaded": context.asr_engine is not None,
             "engine": asr_engine,
             "model": model,
             "model_type": asr_values.get("model_type"),
@@ -104,18 +112,31 @@ def apply_tts_settings(
     settings: TTSSettingsUpdate,
     config_path: str | Path = "conf.yaml",
 ) -> None:
-    contexts = [*client_contexts, default_context]
-    next_configs = [
-        _updated_tts_config(context.character_config.tts_config, settings)
-        for context in contexts
-    ]
+    contexts = [default_context, *client_contexts]
+    tts_config = _updated_tts_config(
+        default_context.character_config.tts_config, settings
+    )
+    asr_config = default_context.character_config.asr_config.model_copy(deep=True)
+    if settings.tts_enabled is not None:
+        tts_config.enabled = settings.tts_enabled
+    if settings.asr_enabled is not None:
+        asr_config.enabled = settings.asr_enabled
 
-    for context, tts_config in zip(contexts, next_configs, strict=True):
-        context.init_tts(tts_config)
-        context.character_config.tts_config = tts_config
-        context.config.character_config.tts_config = tts_config
+    default_context.init_asr(asr_config)
+    default_context.init_tts(tts_config)
 
-    _persist_tts_settings(next_configs[-1], config_path)
+    for context in contexts:
+        context_asr_config = asr_config.model_copy(deep=True)
+        context_tts_config = tts_config.model_copy(deep=True)
+        context.asr_engine = default_context.asr_engine
+        context.tts_engine = default_context.tts_engine
+        context.character_config.asr_config = context_asr_config
+        context.character_config.tts_config = context_tts_config
+        context.config.character_config.asr_config = context_asr_config
+        context.config.character_config.tts_config = context_tts_config
+
+    _persist_audio_settings(tts_config, asr_config, config_path)
+    _release_model_memory()
 
 
 def _updated_tts_config(current: TTSConfig, settings: TTSSettingsUpdate) -> TTSConfig:
@@ -146,10 +167,23 @@ def _updated_tts_config(current: TTSConfig, settings: TTSSettingsUpdate) -> TTSC
 
 
 def _persist_tts_settings(tts_config: TTSConfig, config_path: str | Path) -> None:
+    _persist_audio_settings(tts_config, None, config_path)
+
+
+def _persist_audio_settings(
+    tts_config: TTSConfig,
+    asr_config: ASRConfig | None,
+    config_path: str | Path,
+) -> None:
     path = Path(config_path)
     config_data = yaml.safe_load(path.read_text(encoding="utf-8"))
     persisted_tts = config_data["character_config"]["tts_config"]
+    persisted_tts["enabled"] = tts_config.enabled
     persisted_tts["tts_model"] = tts_config.tts_model
+    if asr_config is not None:
+        config_data["character_config"]["asr_config"]["enabled"] = (
+            asr_config.enabled
+        )
 
     engine_config = getattr(tts_config, tts_config.tts_model)
     engine_values = engine_config.model_dump(exclude_none=True)
@@ -173,3 +207,18 @@ def _persist_tts_settings(tts_config: TTSConfig, config_path: str | Path) -> Non
         encoding="utf-8",
     )
     temporary_path.replace(path)
+
+
+def _release_model_memory() -> None:
+    gc.collect()
+    torch = sys.modules.get("torch")
+    if torch is None:
+        return
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    if (
+        hasattr(torch, "mps")
+        and hasattr(torch.mps, "empty_cache")
+        and torch.backends.mps.is_available()
+    ):
+        torch.mps.empty_cache()

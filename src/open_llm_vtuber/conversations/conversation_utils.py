@@ -145,11 +145,13 @@ async def send_conversation_start_signals(websocket_send: WebSocketSend) -> None
 
 async def process_user_input(
     user_input: Union[str, np.ndarray],
-    asr_engine: ASRInterface,
+    asr_engine: ASRInterface | None,
     websocket_send: WebSocketSend,
 ) -> str:
     """Process user input, converting audio to text if needed"""
     if isinstance(user_input, np.ndarray):
+        if asr_engine is None:
+            raise RuntimeError("ASR is disabled")
         logger.info("Transcribing audio input...")
         input_text = await asr_engine.async_transcribe_np(user_input)
         await websocket_send(

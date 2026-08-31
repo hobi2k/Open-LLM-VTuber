@@ -196,6 +196,8 @@ class ServiceContext:
             self.mcp_client = None
         if self.agent_engine and hasattr(self.agent_engine, "close"):
             await self.agent_engine.close()  # Ensure agent resources are also closed
+        self.asr_engine = None
+        self.tts_engine = None
         logger.info("ServiceContext closed.")
 
     async def load_cache(
@@ -321,6 +323,11 @@ class ServiceContext:
             logger.critical("Try to proceed without Live2D...")
 
     def init_asr(self, asr_config: ASRConfig) -> None:
+        if not asr_config.enabled:
+            logger.info("ASR is disabled.")
+            self.asr_engine = None
+            self.character_config.asr_config = asr_config
+            return
         if not self.asr_engine or (self.character_config.asr_config != asr_config):
             logger.info(f"Initializing ASR: {asr_config.asr_model}")
             self.asr_engine = ASRFactory.get_asr_system(
@@ -333,6 +340,11 @@ class ServiceContext:
             logger.info("ASR already initialized with the same config.")
 
     def init_tts(self, tts_config: TTSConfig) -> None:
+        if not tts_config.enabled:
+            logger.info("TTS is disabled.")
+            self.tts_engine = None
+            self.character_config.tts_config = tts_config
+            return
         if not self.tts_engine or (self.character_config.tts_config != tts_config):
             logger.info(f"Initializing TTS: {tts_config.tts_model}")
             self.tts_engine = TTSFactory.get_tts_engine(

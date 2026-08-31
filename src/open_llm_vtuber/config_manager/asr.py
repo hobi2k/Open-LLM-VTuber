@@ -310,6 +310,7 @@ class SherpaOnnxASRConfig(I18nMixin):
 class ASRConfig(I18nMixin):
     """Configuration for Automatic Speech Recognition."""
 
+    enabled: bool = Field(True, alias="enabled")
     asr_model: Literal[
         "faster_whisper",
         "whisper_cpp",
@@ -332,6 +333,9 @@ class ASRConfig(I18nMixin):
     )
 
     DESCRIPTIONS: ClassVar[Dict[str, Description]] = {
+        "enabled": Description(
+            en="Enable automatic speech recognition", zh="启用自动语音识别"
+        ),
         "asr_model": Description(
             en="Speech-to-text model to use", zh="要使用的语音识别模型"
         ),

@@ -146,6 +146,24 @@ def init_client_ws_route(default_context_cache: ServiceContext) -> APIRouter:
             )
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
+        microphone_control = (
+            "enable-asr"
+            if default_context_cache.asr_engine is not None
+            else "disable-asr"
+        )
+        speech_control = (
+            "enable-tts"
+            if default_context_cache.tts_engine is not None
+            else "disable-tts"
+        )
+        for websocket in list(ws_handler.client_connections.values()):
+            try:
+                for control in (microphone_control, speech_control):
+                    await websocket.send_text(
+                        json.dumps({"type": "control", "text": control})
+                    )
+            except (RuntimeError, WebSocketDisconnect):
+                logger.debug("Skipped audio power update for a closed client")
         return audio_settings_payload(default_context_cache)
 
     @router.websocket("/client-ws")
@@ -265,6 +283,12 @@ def init_webtool_routes(default_context_cache: ServiceContext) -> APIRouter:
         """
         Endpoint for transcribing audio using the ASR engine
         """
+        if default_context_cache.asr_engine is None:
+            return Response(
+                content=json.dumps({"error": "ASR is disabled"}),
+                status_code=503,
+                media_type="application/json",
+            )
         logger.info(f"Received audio file for transcription: {file.filename}")
 
         try:
@@ -331,6 +355,11 @@ def init_webtool_routes(default_context_cache: ServiceContext) -> APIRouter:
                 data = await websocket.receive_json()
                 text = data.get("text")
                 if not text:
+                    continue
+                if default_context_cache.tts_engine is None:
+                    await websocket.send_json(
+                        {"status": "error", "message": "TTS is disabled"}
+                    )
                     continue
 
                 logger.info(f"Received text for TTS: {text}")

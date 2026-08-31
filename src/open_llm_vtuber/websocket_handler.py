@@ -172,8 +172,22 @@ class WebSocketHandler:
         # Send initial group status
         await self.send_group_update(websocket, client_uid)
 
-        # Start microphone
-        await websocket.send_text(json.dumps({"type": "control", "text": "start-mic"}))
+        microphone_control = (
+            "enable-asr"
+            if session_service_context.asr_engine is not None
+            else "disable-asr"
+        )
+        await websocket.send_text(
+            json.dumps({"type": "control", "text": microphone_control})
+        )
+        speech_control = (
+            "enable-tts"
+            if session_service_context.tts_engine is not None
+            else "disable-tts"
+        )
+        await websocket.send_text(
+            json.dumps({"type": "control", "text": speech_control})
+        )
 
     async def _init_service_context(
         self, send_text: Callable, client_uid: str
