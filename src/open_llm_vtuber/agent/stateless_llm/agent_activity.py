@@ -5,7 +5,7 @@ import json
 from typing import Any
 
 
-_MAX_TEXT = 12_000
+_MAX_TEXT = 6_000
 _COMMAND_TOOLS = {"bash", "shell", "terminal", "command", "exec", "run"}
 _FILE_TOOLS = {
     "edit",
@@ -48,7 +48,7 @@ def tool_activity(
         "activity_id": str(activity_id),
         "activity_kind": kind,
         "tool_name": str(tool_name or "tool"),
-        "title": _clip(title or command or path or str(tool_name or "Tool")),
+        "title": _clip(_activity_title(title, inputs, command, path, tool_name)),
         "status": _status(status),
     }
     optional = {
@@ -120,33 +120,47 @@ def _diff_text(inputs: dict, metadata: dict, path: str) -> str:
 
 
 def _input_text(inputs: dict, command: str, path: str) -> str:
-    omitted = {
-        "command",
-        "cmd",
-        "file_path",
-        "filePath",
-        "filepath",
-        "path",
-        "filename",
-        "old_string",
-        "oldString",
-        "old_text",
-        "oldText",
-        "new_string",
-        "newString",
-        "new_text",
-        "newText",
-        "content",
-        "diff",
-        "patch",
-        "patchText",
-    }
-    remaining = {key: value for key, value in inputs.items() if key not in omitted}
-    if remaining:
-        return _structured_text(remaining)
-    if not command and not path:
-        return _structured_text(inputs)
-    return ""
+    if command or path:
+        return ""
+
+    values = []
+    for key in (
+        "query",
+        "q",
+        "url",
+        "pattern",
+        "selector",
+        "target",
+        "workspace",
+        "workdir",
+        "cwd",
+        "prompt",
+    ):
+        value = inputs.get(key)
+        if not isinstance(value, (str, int, float, bool)) or value == "":
+            continue
+        text = str(value).strip()
+        if not text:
+            continue
+        values.append((key, text))
+
+    if len(values) == 1:
+        return values[0][1]
+    return "\n".join(f"{key}: {value}" for key, value in values)
+
+
+def _activity_title(
+    title: str,
+    inputs: dict,
+    command: str,
+    path: str,
+    tool_name: str,
+) -> str:
+    descriptive = _first_text(inputs, "title", "description", "label")
+    generic_title = not title or title.strip().lower() == str(tool_name).strip().lower()
+    if descriptive and generic_title:
+        return descriptive
+    return title or command or path or str(tool_name or "Tool")
 
 
 def _first_text(values: dict, *keys: str) -> str:
@@ -170,26 +184,31 @@ def _structured_text(value: Any) -> str:
         if parsed is not None:
             return _structured_text(parsed)
         return value.strip()
-    if isinstance(value, dict):
-        if isinstance(value.get("diff"), str):
-            remaining = {key: item for key, item in value.items() if key != "diff"}
-            if not remaining:
-                return ""
-            value = remaining
-        if set(value).issubset({"output", "exit_code", "error"}):
-            output = value.get("output")
+    if isinstance(value, list):
+        return "\n".join(part for item in value if (part := _structured_text(item)))
+    if not isinstance(value, dict):
+        return str(value).strip()
+
+    for key in ("content", "text", "output", "result", "message", "summary"):
+        if key not in value:
+            continue
+        text = _structured_text(value[key])
+        if text:
             suffix = []
             if value.get("exit_code") not in {None, 0}:
                 suffix.append(f"exit code: {value['exit_code']}")
             if value.get("error"):
-                suffix.append(str(value["error"]))
-            return "\n".join(
-                part for part in (_structured_text(output), *suffix) if part
-            )
-    try:
-        return json.dumps(value, ensure_ascii=False, indent=2, default=str)
-    except (TypeError, ValueError):
-        return str(value)
+                suffix.append(_structured_text(value["error"]))
+            return "\n".join(part for part in (text, *suffix) if part)
+
+    scalar_values = [
+        f"{key}: {item}"
+        for key, item in value.items()
+        if isinstance(item, (str, int, float, bool))
+        and item != ""
+        and key not in {"type", "id", "activity_id"}
+    ]
+    return "\n".join(scalar_values)
 
 
 def _json_value(value: str) -> Any | None:

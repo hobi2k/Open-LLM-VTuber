@@ -15,6 +15,9 @@ from .agent_activity import activity_signature, tool_activity
 from .stateless_llm_interface import StatelessLLMInterface
 
 
+_SUBPROCESS_STREAM_LIMIT = 32 * 1024 * 1024
+
+
 class CLIAgentLLM(StatelessLLMInterface):
     """Run Claude Code, Codex, or Hermes in a constrained one-shot mode."""
 
@@ -88,6 +91,7 @@ class CLIAgentLLM(StatelessLLMInterface):
                 else asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                limit=_SUBPROCESS_STREAM_LIMIT,
             )
             stderr_task = asyncio.create_task(process.stderr.read())
             if stdin is not None:
@@ -190,6 +194,7 @@ class CLIAgentLLM(StatelessLLMInterface):
             NotADirectoryError,
             PermissionError,
             RuntimeError,
+            ValueError,
         ) as error:
             logger.error("{} request failed: {}", self.runtime, error)
             if reasoning_started:
