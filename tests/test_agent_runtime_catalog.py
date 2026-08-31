@@ -14,6 +14,8 @@ from open_llm_vtuber.agent_runtime_catalog import (
     _codex_sessions,
     _hermes_sessions,
     _merge_models,
+    _merge_sessions,
+    _opencode_local_sessions,
     _opencode_catalog,
     _project,
 )
@@ -75,6 +77,40 @@ class AgentRuntimeCatalogTest(unittest.TestCase):
             self.assertEqual(len(_codex_sessions(home)), 61)
             self.assertEqual(len(_hermes_sessions(home)), 62)
             self.assertEqual(len(_claude_sessions(home)), 63)
+
+    def test_opencode_sessions_load_without_a_running_server(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            path = home / ".local/share/opencode/opencode-dev.db"
+            path.parent.mkdir(parents=True)
+            connection = sqlite3.connect(path)
+            connection.execute(
+                "CREATE TABLE session (id TEXT, title TEXT, directory TEXT, "
+                "time_updated INTEGER, time_archived INTEGER, parent_id TEXT)"
+            )
+            connection.executemany(
+                "INSERT INTO session VALUES (?, ?, ?, ?, ?, ?)",
+                [
+                    ("main", "FANZA development", "/workspace/fanza", 2, None, None),
+                    ("child", "Subagent", "/workspace/fanza", 3, None, "main"),
+                    ("archived", "Old", "/workspace", 1, 4, None),
+                ],
+            )
+            connection.commit()
+            connection.close()
+
+            sessions = _opencode_local_sessions(home)
+
+        self.assertEqual([session["id"] for session in sessions], ["main"])
+        self.assertEqual(sessions[0]["workspace"], "/workspace/fanza")
+
+    def test_session_merge_keeps_latest_copy_and_sort_order(self):
+        sessions = _merge_sessions(
+            [{"id": "same", "updated_at": 1}, {"id": "old", "updated_at": 2}],
+            [{"id": "same", "updated_at": 3}],
+        )
+
+        self.assertEqual([session["id"] for session in sessions], ["same", "old"])
 
     @staticmethod
     def _create_codex_sessions(home: Path, count: int):
@@ -219,7 +255,10 @@ class OpenCodeExecutableTest(unittest.IsolatedAsyncioTestCase):
             provider_id="test",
             model="test",
         )
-        with patch("open_llm_vtuber.opencode_settings.shutil.which", return_value=None):
+        with patch(
+            "open_llm_vtuber.opencode_settings.resolve_executable",
+            return_value=None,
+        ):
             result = await opencode_executable_payload(config)
 
         self.assertFalse(result["available"])

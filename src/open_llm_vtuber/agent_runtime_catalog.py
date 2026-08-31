@@ -1,6 +1,5 @@
 import asyncio
 import json
-import shutil
 import sqlite3
 from contextlib import suppress
 from pathlib import Path
@@ -9,6 +8,11 @@ import httpx
 
 from .agent_runtime_settings import _cli_config, _cli_connection_payload
 from .config_manager.stateless_llm import OpenCodeConfig
+from .executable_utils import (
+    executable_environment,
+    executable_version,
+    resolve_executable,
+)
 from .opencode_settings import get_opencode_config, opencode_executable_payload
 from .service_context import ServiceContext
 
@@ -44,7 +48,10 @@ async def runtime_catalog_payload(context: ServiceContext) -> dict:
         local["models"]["hermes"],
         [{**model, "provider": "omlx"} for model in omlx["models"] if omlx["base_url"]],
     )
-    local["sessions"]["opencode"] = opencode_catalog["sessions"]
+    local["sessions"]["opencode"] = _merge_sessions(
+        opencode_catalog["sessions"],
+        local["sessions"]["opencode"],
+    )
 
     configured_projects = [
         _project(config.workspace_directory, "VTuber")
@@ -183,7 +190,7 @@ async def _opencode_sessions(client: httpx.AsyncClient, directory: str) -> list:
 
 
 async def _omlx_catalog() -> dict:
-    executable = shutil.which("omlx")
+    executable = resolve_executable("auto", "omlx")
     headers = {}
     candidates = ["http://127.0.0.1:8005/v1", "http://127.0.0.1:8000/v1"]
     settings_path = Path.home() / ".omlx/settings.json"
@@ -211,12 +218,13 @@ async def _omlx_catalog() -> dict:
             process = await asyncio.create_subprocess_exec(
                 executable,
                 "--version",
+                env=executable_environment(),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
             stdout, _ = await asyncio.wait_for(process.communicate(), timeout=3)
             output = stdout.decode("utf-8", errors="replace").strip()
-            result["version"] = output.splitlines()[0] if output else None
+            result["version"] = executable_version(output)
 
     async def probe(base_url: str) -> tuple[str, list] | None:
         try:
@@ -250,6 +258,7 @@ async def _omlx_catalog() -> dict:
 
 
 def _local_catalog() -> dict:
+    opencode_sessions = _opencode_local_sessions()
     codex_sessions = _codex_sessions()
     hermes_sessions = _hermes_sessions()
     claude_sessions = _claude_sessions()
@@ -268,6 +277,7 @@ def _local_catalog() -> dict:
             [
                 _project(session["workspace"], "Recent")
                 for session in [
+                    *opencode_sessions,
                     *codex_sessions,
                     *hermes_sessions,
                     *claude_sessions,
@@ -276,11 +286,44 @@ def _local_catalog() -> dict:
             ]
         ),
         "sessions": {
+            "opencode": opencode_sessions,
             "claude_code": claude_sessions,
             "codex": codex_sessions,
             "hermes": hermes_sessions,
         },
     }
+
+
+def _opencode_local_sessions(home: Path | None = None) -> list[dict]:
+    root = (home or Path.home()) / ".local/share/opencode"
+    sessions = {}
+    for path in root.glob("opencode*.db"):
+        with suppress(sqlite3.Error):
+            connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+            try:
+                rows = connection.execute(
+                    "SELECT id, title, directory, time_updated FROM session "
+                    "WHERE time_archived IS NULL AND parent_id IS NULL "
+                    "ORDER BY time_updated DESC"
+                ).fetchall()
+            finally:
+                connection.close()
+            for row in rows:
+                session = {
+                    "id": row[0],
+                    "title": _session_title(row[1]),
+                    "workspace": row[2],
+                    "updated_at": row[3],
+                    "source": "opencode",
+                }
+                current = sessions.get(session["id"])
+                if not current or session["updated_at"] > current["updated_at"]:
+                    sessions[session["id"]] = session
+    return sorted(
+        sessions.values(),
+        key=lambda session: session.get("updated_at") or 0,
+        reverse=True,
+    )
 
 
 def _codex_models() -> list[dict]:
@@ -438,3 +481,18 @@ def _merge_projects(*groups: list[dict]) -> list[dict]:
         if path:
             result[path] = project
     return list(result.values())
+
+
+def _merge_sessions(*groups: list[dict]) -> list[dict]:
+    result = {}
+    for session in (item for group in groups for item in group):
+        current = result.get(session.get("id"))
+        if not current or (session.get("updated_at") or 0) > (
+            current.get("updated_at") or 0
+        ):
+            result[session.get("id")] = session
+    return sorted(
+        result.values(),
+        key=lambda session: session.get("updated_at") or 0,
+        reverse=True,
+    )
