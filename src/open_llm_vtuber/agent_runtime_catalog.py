@@ -6,8 +6,12 @@ from pathlib import Path
 
 import httpx
 
-from .agent_runtime_settings import _cli_config, _cli_connection_payload
-from .config_manager.stateless_llm import OpenCodeConfig
+from .agent_runtime_settings import (
+    AgentRuntimeSettingsUpdate,
+    _cli_config,
+    _cli_connection_payload,
+)
+from .config_manager.stateless_llm import CLIAgentConfig, OpenCodeConfig
 from .executable_utils import (
     executable_environment,
     executable_version,
@@ -17,11 +21,11 @@ from .opencode_settings import get_opencode_config, opencode_executable_payload
 from .service_context import ServiceContext
 
 
-async def runtime_catalog_payload(context: ServiceContext) -> dict:
-    opencode = get_opencode_config(context)
-    claude_code = _cli_config(context, "claude_code_llm")
-    codex = _cli_config(context, "codex_cli_llm")
-    hermes = _cli_config(context, "hermes_cli_llm")
+async def runtime_catalog_payload(
+    context: ServiceContext,
+    settings: AgentRuntimeSettingsUpdate | None = None,
+) -> dict:
+    opencode, claude_code, codex, hermes = _runtime_configs(context, settings)
     (
         opencode_catalog,
         omlx,
@@ -79,6 +83,32 @@ async def runtime_catalog_payload(context: ServiceContext) -> dict:
         ),
         "sessions": local["sessions"],
     }
+
+
+def _runtime_configs(
+    context: ServiceContext,
+    settings: AgentRuntimeSettingsUpdate | None,
+) -> tuple[OpenCodeConfig, CLIAgentConfig, CLIAgentConfig, CLIAgentConfig]:
+    if settings is None:
+        return (
+            get_opencode_config(context),
+            _cli_config(context, "claude_code_llm"),
+            _cli_config(context, "codex_cli_llm"),
+            _cli_config(context, "hermes_cli_llm"),
+        )
+
+    current_opencode = get_opencode_config(context)
+    return (
+        OpenCodeConfig(
+            **settings.opencode.model_dump(),
+            interrupt_method=current_opencode.interrupt_method,
+            server_username=current_opencode.server_username,
+            server_password=current_opencode.server_password,
+        ),
+        CLIAgentConfig(**settings.claude_code.model_dump()),
+        CLIAgentConfig(**settings.codex.model_dump()),
+        CLIAgentConfig(**settings.hermes.model_dump()),
+    )
 
 
 async def _opencode_catalog(config: OpenCodeConfig) -> dict:

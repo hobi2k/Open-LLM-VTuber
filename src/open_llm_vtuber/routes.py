@@ -119,6 +119,14 @@ def init_client_ws_route(default_context_cache: ServiceContext) -> APIRouter:
         require_local_request(request)
         return await runtime_catalog_payload(default_context_cache)
 
+    @router.post("/api/agent-runtime/catalog")
+    async def refresh_agent_runtime_catalog(
+        request: Request,
+        settings: AgentRuntimeSettingsUpdate,
+    ):
+        require_local_request(request)
+        return await runtime_catalog_payload(default_context_cache, settings)
+
     @router.get("/api/audio/settings")
     async def get_audio_settings(request: Request):
         require_local_request(request)
