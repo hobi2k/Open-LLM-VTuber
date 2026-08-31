@@ -14,7 +14,7 @@ from .executable_utils import (
 )
 from .opencode_settings import (
     OpenCodeSettingsUpdate,
-    connection_payload as opencode_connection_payload,
+    discover_connection_payload as opencode_connection_payload,
     get_opencode_config,
 )
 from .service_context import ServiceContext
@@ -135,6 +135,9 @@ def _cli_payload(config: CLIAgentConfig) -> dict:
 def _unchecked_opencode_connection() -> dict:
     return {
         "connected": False,
+        "base_url": None,
+        "source": None,
+        "managed": False,
         "version": None,
         "path": None,
         "executable_available": False,
@@ -225,7 +228,10 @@ async def runtime_connection_payload(
         server_password=current_opencode.server_password,
     )
     statuses = await asyncio.gather(
-        opencode_connection_payload(opencode),
+        opencode_connection_payload(
+            opencode,
+            auto_start=settings.provider == "opencode_llm",
+        ),
         _cli_connection_payload(
             CLIAgentConfig(**settings.claude_code.model_dump()), "claude_code"
         ),
