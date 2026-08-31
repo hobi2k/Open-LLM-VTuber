@@ -132,6 +132,27 @@ def _cli_payload(config: CLIAgentConfig) -> dict:
     }
 
 
+def _unchecked_opencode_connection() -> dict:
+    return {
+        "connected": False,
+        "version": None,
+        "path": None,
+        "executable_available": False,
+        "executable_version": None,
+        "executable_error": None,
+        "error": None,
+    }
+
+
+def _unchecked_cli_connection() -> dict:
+    return {
+        "available": False,
+        "path": None,
+        "version": None,
+        "error": None,
+    }
+
+
 def _active_session_id(context: ServiceContext) -> str:
     llm = getattr(context.agent_engine, "_llm", None)
     session_id = getattr(llm, "session_id", "")
@@ -143,12 +164,6 @@ async def runtime_settings_payload(context: ServiceContext) -> dict:
     claude_code = _cli_config(context, "claude_code_llm")
     codex = _cli_config(context, "codex_cli_llm")
     hermes = _cli_config(context, "hermes_cli_llm")
-    opencode_status, claude_status, codex_status, hermes_status = await asyncio.gather(
-        opencode_connection_payload(opencode),
-        _cli_connection_payload(claude_code, "claude_code"),
-        _cli_connection_payload(codex, "codex"),
-        _cli_connection_payload(hermes, "hermes"),
-    )
     active = context.character_config.agent_config.agent_settings.basic_memory_agent.llm_provider
     active_session_id = _active_session_id(context)
     return {
@@ -170,7 +185,7 @@ async def runtime_settings_payload(context: ServiceContext) -> dict:
             "allow_tools": opencode.allow_tools,
             "show_reasoning": opencode.show_reasoning,
             "has_server_password": bool(opencode.server_password),
-            "connection": opencode_status,
+            "connection": _unchecked_opencode_connection(),
         },
         "claude_code": {
             **_cli_payload(claude_code),
@@ -179,21 +194,21 @@ async def runtime_settings_payload(context: ServiceContext) -> dict:
                 if active == "claude_code_llm"
                 else claude_code.session_id
             ),
-            "connection": claude_status,
+            "connection": _unchecked_cli_connection(),
         },
         "codex": {
             **_cli_payload(codex),
             "session_id": (
                 active_session_id if active == "codex_cli_llm" else codex.session_id
             ),
-            "connection": codex_status,
+            "connection": _unchecked_cli_connection(),
         },
         "hermes": {
             **_cli_payload(hermes),
             "session_id": (
                 active_session_id if active == "hermes_cli_llm" else hermes.session_id
             ),
-            "connection": hermes_status,
+            "connection": _unchecked_cli_connection(),
         },
     }
 

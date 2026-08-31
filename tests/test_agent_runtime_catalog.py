@@ -18,9 +18,16 @@ from open_llm_vtuber.agent_runtime_catalog import (
     _opencode_local_sessions,
     _opencode_catalog,
     _project,
+    _runtime_configs,
 )
+from open_llm_vtuber.agent_runtime_settings import (
+    AgentRuntimeSettingsUpdate,
+    CLISettingsUpdate,
+)
+from open_llm_vtuber.config_manager import read_yaml, validate_config
 from open_llm_vtuber.config_manager.stateless_llm import OpenCodeConfig
 from open_llm_vtuber.opencode_settings import opencode_executable_payload
+from open_llm_vtuber.opencode_settings import OpenCodeSettingsUpdate
 
 
 class AgentRuntimeCatalogTest(unittest.TestCase):
@@ -111,6 +118,30 @@ class AgentRuntimeCatalogTest(unittest.TestCase):
         )
 
         self.assertEqual([session["id"] for session in sessions], ["same", "old"])
+
+    def test_catalog_uses_current_unsaved_settings(self):
+        config = validate_config(read_yaml("conf.yaml"))
+        context = type("Context", (), {"character_config": config.character_config})()
+        cli = CLISettingsUpdate(workspace_directory="/current/cli")
+        settings = AgentRuntimeSettingsUpdate(
+            provider="codex_cli_llm",
+            opencode=OpenCodeSettingsUpdate(
+                base_url="http://127.0.0.1:4096",
+                provider_id="test",
+                model="test",
+                workspace_directory="/current/opencode",
+            ),
+            claude_code=cli,
+            codex=cli.model_copy(update={"workspace_directory": "/current/codex"}),
+            hermes=cli.model_copy(update={"workspace_directory": "/current/hermes"}),
+        )
+
+        opencode, claude, codex, hermes = _runtime_configs(context, settings)
+
+        self.assertEqual(opencode.workspace_directory, "/current/opencode")
+        self.assertEqual(claude.workspace_directory, "/current/cli")
+        self.assertEqual(codex.workspace_directory, "/current/codex")
+        self.assertEqual(hermes.workspace_directory, "/current/hermes")
 
     @staticmethod
     def _create_codex_sessions(home: Path, count: int):

@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import yaml
 
@@ -18,6 +19,7 @@ from open_llm_vtuber.agent_runtime_settings import (
     AgentRuntimeSettingsUpdate,
     CLISettingsUpdate,
     persist_runtime_settings,
+    runtime_settings_payload,
 )
 
 
@@ -176,6 +178,34 @@ class OpenCodeSettingsTest(unittest.TestCase):
             self.assertIsNotNone(llm_configs.claude_code_llm, path)
             self.assertIsNotNone(llm_configs.codex_cli_llm, path)
             self.assertIsNotNone(llm_configs.hermes_cli_llm, path)
+
+
+class AgentRuntimeSettingsPayloadTest(unittest.IsolatedAsyncioTestCase):
+    async def test_loading_settings_does_not_probe_runtimes(self):
+        config = validate_config(read_yaml("conf.yaml"))
+        context = SimpleNamespace(
+            character_config=config.character_config,
+            agent_engine=SimpleNamespace(),
+        )
+
+        with (
+            patch(
+                "open_llm_vtuber.agent_runtime_settings.opencode_connection_payload",
+                new=AsyncMock(),
+            ) as opencode_probe,
+            patch(
+                "open_llm_vtuber.agent_runtime_settings._cli_connection_payload",
+                new=AsyncMock(),
+            ) as cli_probe,
+        ):
+            payload = await runtime_settings_payload(context)
+
+        opencode_probe.assert_not_awaited()
+        cli_probe.assert_not_awaited()
+        self.assertFalse(payload["opencode"]["connection"]["connected"])
+        self.assertIsNone(payload["opencode"]["connection"]["error"])
+        self.assertFalse(payload["codex"]["connection"]["available"])
+        self.assertIsNone(payload["codex"]["connection"]["error"])
 
 
 if __name__ == "__main__":
