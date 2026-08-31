@@ -29,6 +29,7 @@ class CLIAgentLLM(StatelessLLMInterface):
         workspace_directory: str = ".",
         timeout: float = 300,
         show_reasoning: bool = False,
+        reasoning_effort: str = "default",
         allow_tools: bool = False,
     ):
         self.runtime = runtime
@@ -41,6 +42,7 @@ class CLIAgentLLM(StatelessLLMInterface):
         self.workspace_directory = str(Path(workspace_directory).expanduser().resolve())
         self.timeout = timeout
         self.show_reasoning = show_reasoning
+        self.reasoning_effort = reasoning_effort
         self.allow_tools = allow_tools
         self.support_tools = False
 
@@ -183,6 +185,8 @@ class CLIAgentLLM(StatelessLLMInterface):
                 command.extend(["--tools", "", "--permission-mode", "dontAsk"])
             if self.show_reasoning:
                 command.extend(["--include-partial-messages", "--verbose"])
+            if self.reasoning_effort != "default":
+                command.extend(["--effort", self.reasoning_effort])
             if self.session_id:
                 command.extend(["--resume", self.session_id])
             else:
@@ -222,6 +226,10 @@ class CLIAgentLLM(StatelessLLMInterface):
                     command.append("--ignore-rules")
             if self.model:
                 command.extend(["--model", self.model])
+            if self.reasoning_effort != "default":
+                command.extend(
+                    ["-c", f'model_reasoning_effort="{self.reasoning_effort}"']
+                )
             if self.session_id:
                 command.append(self.session_id)
             command.append("-")

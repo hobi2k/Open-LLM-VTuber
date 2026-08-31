@@ -211,6 +211,9 @@ class CLIAgentConfig(StatelessLLMBaseConfig):
     workspace_directory: str = Field(".", min_length=1, alias="workspace_directory")
     timeout: float = Field(300, gt=0, alias="timeout")
     show_reasoning: bool = Field(False, alias="show_reasoning")
+    reasoning_effort: Literal[
+        "default", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"
+    ] = Field("default", alias="reasoning_effort")
     allow_tools: bool = Field(False, alias="allow_tools")
 
 

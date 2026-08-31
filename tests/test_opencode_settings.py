@@ -94,6 +94,7 @@ class OpenCodeSettingsTest(unittest.TestCase):
                 workspace_directory="/tmp",
                 timeout=45,
                 interaction_mode="coding",
+                reasoning_effort="high",
                 allow_tools=True,
             )
             settings = AgentRuntimeSettingsUpdate(
@@ -139,6 +140,10 @@ class OpenCodeSettingsTest(unittest.TestCase):
             )
             self.assertTrue(
                 agent_config["llm_configs"]["claude_code_llm"]["allow_tools"]
+            )
+            self.assertEqual(
+                agent_config["llm_configs"]["claude_code_llm"]["reasoning_effort"],
+                "high",
             )
             validate_config(saved)
 

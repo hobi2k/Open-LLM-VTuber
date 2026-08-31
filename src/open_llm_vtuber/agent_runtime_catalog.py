@@ -292,6 +292,11 @@ def _codex_models() -> list[dict]:
                 "id": str(model["slug"]),
                 "label": str(model.get("display_name") or model["slug"]),
                 "provider": "openai",
+                "reasoning_efforts": [
+                    str(level["effort"])
+                    for level in model.get("supported_reasoning_levels", [])
+                    if isinstance(level, dict) and level.get("effort")
+                ],
             }
             for model in payload.get("models", [])
             if model.get("slug") and model.get("visibility") != "hide"

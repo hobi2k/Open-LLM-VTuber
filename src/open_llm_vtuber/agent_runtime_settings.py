@@ -34,6 +34,9 @@ class CLISettingsUpdate(BaseModel):
     workspace_directory: str = Field(default=".", min_length=1)
     timeout: float = Field(default=300, gt=0)
     show_reasoning: bool = False
+    reasoning_effort: Literal[
+        "default", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"
+    ] = "default"
     allow_tools: bool = False
 
 
@@ -124,6 +127,7 @@ def _cli_payload(config: CLIAgentConfig) -> dict:
         "workspace_directory": config.workspace_directory,
         "timeout": config.timeout,
         "show_reasoning": config.show_reasoning,
+        "reasoning_effort": config.reasoning_effort,
         "allow_tools": config.allow_tools,
     }
 

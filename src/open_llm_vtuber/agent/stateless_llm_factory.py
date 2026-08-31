@@ -96,6 +96,7 @@ class LLMFactory:
                 workspace_directory=kwargs.get("workspace_directory"),
                 timeout=kwargs.get("timeout"),
                 show_reasoning=kwargs.get("show_reasoning", False),
+                reasoning_effort=kwargs.get("reasoning_effort", "default"),
                 allow_tools=kwargs.get("allow_tools", False),
             )
 

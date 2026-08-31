@@ -199,6 +199,30 @@ class CLIAgentLLMTest(unittest.IsolatedAsyncioTestCase):
         arguments = json.loads(self.arguments.read_text(encoding="utf-8"))
         self.assertNotIn("model_reasoning_effort", " ".join(arguments))
 
+    async def test_claude_applies_reasoning_effort_when_resuming(self):
+        llm = self._llm("claude_code", reasoning_effort="xhigh")
+        await self._complete_with(llm)
+        initial_arguments = json.loads(self.arguments.read_text(encoding="utf-8"))
+        await self._complete_with(llm)
+
+        arguments = json.loads(self.arguments.read_text(encoding="utf-8"))
+        self.assertEqual(
+            initial_arguments[initial_arguments.index("--effort") + 1], "xhigh"
+        )
+        self.assertEqual(arguments[arguments.index("--effort") + 1], "xhigh")
+        self.assertIn("--resume", arguments)
+
+    async def test_codex_applies_reasoning_effort_when_resuming(self):
+        llm = self._llm("codex", reasoning_effort="high")
+        await self._complete_with(llm)
+        initial_arguments = json.loads(self.arguments.read_text(encoding="utf-8"))
+        await self._complete_with(llm)
+
+        arguments = json.loads(self.arguments.read_text(encoding="utf-8"))
+        self.assertIn('model_reasoning_effort="high"', initial_arguments)
+        self.assertIn('model_reasoning_effort="high"', arguments)
+        self.assertEqual(arguments[:3], ["exec", "resume", "--json"])
+
     async def test_hermes_reads_reasoning_from_its_native_session(self):
         database = self.directory / "state.db"
         connection = sqlite3.connect(database)
@@ -289,6 +313,7 @@ class CLIAgentLLMTest(unittest.IsolatedAsyncioTestCase):
         model="",
         provider="",
         show_reasoning=False,
+        reasoning_effort="default",
         interaction_mode="character",
         allow_tools=False,
     ):
@@ -300,6 +325,7 @@ class CLIAgentLLMTest(unittest.IsolatedAsyncioTestCase):
             workspace_directory=str(self.directory),
             timeout=5,
             show_reasoning=show_reasoning,
+            reasoning_effort=reasoning_effort,
             interaction_mode=interaction_mode,
             allow_tools=allow_tools,
         )

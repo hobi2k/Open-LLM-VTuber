@@ -145,6 +145,7 @@ character_config:
         workspace_directory: '.'
         timeout: 300
         show_reasoning: False
+        reasoning_effort: 'default'
         interrupt_method: 'user'
 
       codex_cli_llm:
@@ -156,6 +157,7 @@ character_config:
         workspace_directory: '.'
         timeout: 300
         show_reasoning: False
+        reasoning_effort: 'default'
         interrupt_method: 'user'
 
       hermes_cli_llm:

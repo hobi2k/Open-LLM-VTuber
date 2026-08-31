@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlparse
 
 from open_llm_vtuber.agent_runtime_catalog import (
     _claude_sessions,
+    _codex_models,
     _codex_sessions,
     _hermes_sessions,
     _merge_models,
@@ -31,6 +32,38 @@ class AgentRuntimeCatalogTest(unittest.TestCase):
         )
 
         self.assertEqual(len(models), 2)
+
+    def test_codex_models_include_supported_reasoning_efforts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            cache = home / ".codex/models_cache.json"
+            cache.parent.mkdir()
+            cache.write_text(
+                json.dumps(
+                    {
+                        "models": [
+                            {
+                                "slug": "test-model",
+                                "display_name": "Test model",
+                                "visibility": "list",
+                                "supported_reasoning_levels": [
+                                    {"effort": "low"},
+                                    {"effort": "high"},
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch(
+                "open_llm_vtuber.agent_runtime_catalog.Path.home",
+                return_value=home,
+            ):
+                models = _codex_models()
+
+        self.assertEqual(models[0]["reasoning_efforts"], ["low", "high"])
 
     def test_local_catalogs_return_more_than_fifty_native_sessions(self):
         with tempfile.TemporaryDirectory() as directory:
