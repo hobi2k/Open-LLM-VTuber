@@ -33,7 +33,7 @@ class TTSTaskManager:
         display_text: DisplayText,
         actions: Optional[Actions],
         live2d_model: Live2dModel,
-        tts_engine: TTSInterface,
+        tts_engine: TTSInterface | None,
         websocket_send: WebSocketSend,
     ) -> None:
         """
@@ -47,8 +47,10 @@ class TTSTaskManager:
             tts_engine: TTS engine instance
             websocket_send: WebSocket send function
         """
-        if len(re.sub(r'[\s.,!?，。！？\'"』」）】\s]+', "", tts_text)) == 0:
-            logger.debug("Empty TTS text, sending silent display payload")
+        if tts_engine is None or len(
+            re.sub(r'[\s.,!?，。！？\'"』」）】\s]+', "", tts_text)
+        ) == 0:
+            logger.debug("TTS unavailable or empty, sending silent display payload")
             # Get current sequence number for silent payload
             current_sequence = self._sequence_counter
             self._sequence_counter += 1

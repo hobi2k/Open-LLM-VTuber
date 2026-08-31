@@ -65,6 +65,13 @@ async def handle_conversation_trigger(
     elif msg_type == "text-input":
         user_input = data.get("text", "")
     else:  # mic-audio-end
+        if context.asr_engine is None:
+            received_data_buffers[client_uid] = np.array([])
+            await websocket.send_text(
+                json.dumps({"type": "control", "text": "stop-mic"})
+            )
+            logger.info("Ignored microphone audio because ASR is disabled")
+            return
         user_input = received_data_buffers[client_uid]
         received_data_buffers[client_uid] = np.array([])
 

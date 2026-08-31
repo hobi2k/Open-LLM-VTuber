@@ -683,6 +683,7 @@ class CartesiaTTSConfig(I18nMixin):
 class TTSConfig(I18nMixin):
     """Configuration for Text-to-Speech."""
 
+    enabled: bool = Field(True, alias="enabled")
     tts_model: Literal[
         "azure_tts",
         "bark_tts",
@@ -728,6 +729,9 @@ class TTSConfig(I18nMixin):
     piper_tts: Optional[PiperTTSConfig] = Field(None, alias="piper_tts")
 
     DESCRIPTIONS: ClassVar[Dict[str, Description]] = {
+        "enabled": Description(
+            en="Enable text-to-speech output", zh="启用文本转语音输出"
+        ),
         "tts_model": Description(
             en="Text-to-speech model to use", zh="要使用的文本转语音模型"
         ),
