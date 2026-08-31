@@ -653,6 +653,7 @@ class BasicMemoryAgent(AgentInterface):
                         "reasoning-start",
                         "reasoning-delta",
                         "reasoning-end",
+                        "agent-activity",
                     }:
                         yield event
                         continue

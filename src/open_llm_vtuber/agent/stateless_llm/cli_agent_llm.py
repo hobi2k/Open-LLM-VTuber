@@ -11,6 +11,7 @@ from uuid import uuid4
 from loguru import logger
 
 from ...executable_utils import executable_environment, resolve_executable
+from .agent_activity import activity_signature, tool_activity
 from .stateless_llm_interface import StatelessLLMInterface
 
 
@@ -45,6 +46,7 @@ class CLIAgentLLM(StatelessLLMInterface):
         self.reasoning_effort = reasoning_effort
         self.allow_tools = allow_tools
         self.support_tools = False
+        self._activity_inputs: Dict[str, tuple[str, dict]] = {}
 
     async def chat_completion(
         self,
@@ -61,10 +63,20 @@ class CLIAgentLLM(StatelessLLMInterface):
             else self._build_prompt(messages, system)
         )
         command, stdin = self._command(prompt)
+        if self.interaction_mode == "coding":
+            self._activity_inputs.clear()
         process = None
         stderr_task = None
         reasoning_id = f"{self.runtime}-{uuid4().hex}"
         reasoning_started = False
+        activity_signatures = {}
+        hermes_after_id = (
+            self._hermes_last_message_id()
+            if self.runtime == "hermes"
+            and self.interaction_mode == "coding"
+            and self.session_id
+            else 0
+        )
 
         try:
             process = await asyncio.create_subprocess_exec(
@@ -102,6 +114,13 @@ class CLIAgentLLM(StatelessLLMInterface):
                     yield self._reasoning_event(
                         "reasoning-delta", reasoning_id, reasoning
                     )
+                if self.interaction_mode == "coding" and self.runtime != "hermes":
+                    for activity in self._activity_events(text):
+                        signature = activity_signature(activity)
+                        if activity_signatures.get(activity["activity_id"]) == signature:
+                            continue
+                        activity_signatures[activity["activity_id"]] = signature
+                        yield activity
 
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
@@ -131,6 +150,11 @@ class CLIAgentLLM(StatelessLLMInterface):
                     response = native_response
                 if self.show_reasoning:
                     reasoning = native_reasoning
+            hermes_activities = (
+                await asyncio.to_thread(self._hermes_activity_events, hermes_after_id)
+                if self.runtime == "hermes" and self.interaction_mode == "coding"
+                else []
+            )
             if reasoning:
                 yield self._reasoning_event("reasoning-start", reasoning_id)
                 yield self._reasoning_event(
@@ -139,6 +163,8 @@ class CLIAgentLLM(StatelessLLMInterface):
                 reasoning_started = True
             if reasoning_started:
                 yield self._reasoning_event("reasoning-end", reasoning_id)
+            for activity in hermes_activities:
+                yield activity
             if not response:
                 raise RuntimeError("the CLI returned an empty response")
             yield response.lstrip()
@@ -172,11 +198,12 @@ class CLIAgentLLM(StatelessLLMInterface):
 
     def _command(self, prompt: str) -> tuple[list[str], str | None]:
         if self.runtime == "claude_code":
+            stream_output = self.show_reasoning or self.interaction_mode == "coding"
             command = [
                 self.executable,
                 "-p",
                 "--output-format",
-                "stream-json" if self.show_reasoning else "json",
+                "stream-json" if stream_output else "json",
             ]
             if self.allow_tools:
                 command.extend(
@@ -184,8 +211,10 @@ class CLIAgentLLM(StatelessLLMInterface):
                 )
             else:
                 command.extend(["--tools", "", "--permission-mode", "dontAsk"])
+            if stream_output:
+                command.append("--verbose")
             if self.show_reasoning:
-                command.extend(["--include-partial-messages", "--verbose"])
+                command.append("--include-partial-messages")
             if self.reasoning_effort != "default":
                 command.extend(["--effort", self.reasoning_effort])
             if self.session_id:
@@ -394,12 +423,261 @@ class CLIAgentLLM(StatelessLLMInterface):
             return "".join(deltas)
         return self._reasoning_text(output)
 
+    def _activity_events(self, output: str) -> List[Dict[str, Any]]:
+        if self.runtime == "claude_code":
+            return [
+                event
+                for payload in self._json_payloads(output)
+                for event in self._claude_activity_events(payload)
+            ]
+        if self.runtime == "codex":
+            return [
+                event
+                for payload in self._json_payloads(output)
+                for event in self._codex_activity_events(payload)
+            ]
+        return []
+
+    def _claude_activity_events(self, payload: dict) -> List[Dict[str, Any]]:
+        blocks = []
+        if payload.get("type") in {"assistant", "user"}:
+            blocks = payload.get("message", {}).get("content", [])
+        if payload.get("type") == "stream_event":
+            native_event = payload.get("event", {})
+            if native_event.get("type") == "content_block_start":
+                blocks = [native_event.get("content_block", {})]
+
+        activities = []
+        for block in blocks if isinstance(blocks, list) else []:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use":
+                call_id = str(block.get("id") or uuid4().hex)
+                tool_name = str(block.get("name") or "tool")
+                inputs = self._dict_value(block.get("input"))
+                self._activity_inputs[call_id] = (tool_name, inputs)
+                activities.append(
+                    tool_activity(
+                        call_id,
+                        tool_name,
+                        "running",
+                        input_data=inputs,
+                    )
+                )
+                continue
+            if block.get("type") != "tool_result":
+                continue
+            call_id = str(block.get("tool_use_id") or uuid4().hex)
+            tool_name, inputs = self._activity_inputs.get(
+                call_id, (str(block.get("name") or "tool"), {})
+            )
+            result = block.get("content")
+            failed = block.get("is_error") is True
+            activities.append(
+                tool_activity(
+                    call_id,
+                    tool_name,
+                    "error" if failed else "completed",
+                    input_data=inputs,
+                    output=None if failed else result,
+                    error=result if failed else None,
+                )
+            )
+        return activities
+
+    def _codex_activity_events(self, payload: dict) -> List[Dict[str, Any]]:
+        event_type = str(payload.get("type") or "")
+        if event_type not in {"item.started", "item.updated", "item.completed"}:
+            return []
+        item = payload.get("item", {})
+        if not isinstance(item, dict):
+            return []
+        item_type = str(item.get("type") or "")
+        status = self._codex_status(event_type, item)
+        activity_id = str(item.get("id") or f"codex-{uuid4().hex}")
+
+        if item_type == "command_execution":
+            command = self._text_value(item.get("command"))
+            return [
+                tool_activity(
+                    activity_id,
+                    "command",
+                    status,
+                    input_data={"command": command},
+                    title=command,
+                    output=item.get("aggregated_output") or item.get("output"),
+                    error=item.get("error"),
+                    metadata={"exit_code": item.get("exit_code")},
+                )
+            ]
+
+        if item_type == "file_change":
+            changes = item.get("changes", [])
+            changes = changes if isinstance(changes, list) else []
+            paths = [
+                str(change.get("path"))
+                for change in changes
+                if isinstance(change, dict) and change.get("path")
+            ]
+            diffs = [
+                str(change.get("diff") or change.get("patch"))
+                for change in changes
+                if isinstance(change, dict)
+                and (change.get("diff") or change.get("patch"))
+            ]
+            path = "\n".join(paths)
+            diff = "\n\n".join(diffs) or self._text_value(item.get("diff"))
+            return [
+                tool_activity(
+                    activity_id,
+                    "file_change",
+                    status,
+                    input_data={"path": path, "diff": diff},
+                    title=path or "File changes",
+                    output=item.get("output"),
+                    error=item.get("error"),
+                )
+            ]
+
+        if item_type not in {"mcp_tool_call", "web_search", "tool_call"}:
+            return []
+        tool_name = str(
+            item.get("tool")
+            or item.get("name")
+            or item.get("server")
+            or item_type
+        )
+        inputs = self._dict_value(item.get("arguments") or item.get("input"))
+        return [
+            tool_activity(
+                activity_id,
+                tool_name,
+                status,
+                input_data=inputs,
+                title=str(item.get("title") or tool_name),
+                output=item.get("result") or item.get("output"),
+                error=item.get("error"),
+            )
+        ]
+
+    def _hermes_last_message_id(self) -> int:
+        database = self._hermes_database()
+        if not self.session_id or not database.is_file():
+            return 0
+        try:
+            connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=1)
+            row = connection.execute(
+                "SELECT COALESCE(MAX(id), 0) FROM messages WHERE session_id = ?",
+                (self.session_id,),
+            ).fetchone()
+            connection.close()
+            return int(row[0]) if row else 0
+        except sqlite3.Error as error:
+            logger.warning("Could not inspect Hermes activity cursor: {}", error)
+            return 0
+
+    def _hermes_activity_events(self, after_id: int) -> List[Dict[str, Any]]:
+        database = self._hermes_database()
+        if not self.session_id or not database.is_file():
+            return []
+        try:
+            connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=1)
+            rows = connection.execute(
+                """
+                SELECT id, role, content, tool_call_id, tool_calls, tool_name
+                FROM messages
+                WHERE session_id = ? AND id > ? AND active = 1
+                  AND (tool_calls IS NOT NULL OR tool_call_id IS NOT NULL)
+                ORDER BY id
+                """,
+                (self.session_id, after_id),
+            ).fetchall()
+            connection.close()
+        except sqlite3.Error as error:
+            logger.warning("Could not read Hermes tool activity: {}", error)
+            return []
+
+        calls: Dict[str, tuple[str, dict]] = {}
+        activities = []
+        for row_id, role, content, tool_call_id, tool_calls, tool_name in rows:
+            if role == "assistant" and isinstance(tool_calls, str):
+                parsed = self._json_value(tool_calls)
+                values = parsed if isinstance(parsed, list) else [parsed]
+                for call in values:
+                    if not isinstance(call, dict):
+                        continue
+                    function = call.get("function", {})
+                    function = function if isinstance(function, dict) else {}
+                    call_id = str(
+                        call.get("call_id") or call.get("id") or f"hermes-{row_id}"
+                    )
+                    name = str(function.get("name") or call.get("name") or "tool")
+                    inputs = self._dict_value(
+                        function.get("arguments") or call.get("arguments")
+                    )
+                    calls[call_id] = (name, inputs)
+                    activities.append(
+                        tool_activity(call_id, name, "running", input_data=inputs)
+                    )
+                continue
+            if role != "tool" or not tool_call_id:
+                continue
+            call_id = str(tool_call_id)
+            name, inputs = calls.get(call_id, (str(tool_name or "tool"), {}))
+            result = self._json_value(content) if isinstance(content, str) else content
+            failed = isinstance(result, dict) and (
+                result.get("success") is False
+                or (
+                    result.get("error") is not None
+                    and result.get("error") != ""
+                )
+                or result.get("exit_code") not in {None, 0}
+            )
+            activities.append(
+                tool_activity(
+                    call_id,
+                    name,
+                    "error" if failed else "completed",
+                    input_data=inputs,
+                    output=result,
+                    error=result.get("error") if failed and isinstance(result, dict) else None,
+                    metadata=result,
+                )
+            )
+        return activities
+
+    @staticmethod
+    def _codex_status(event_type: str, item: dict) -> str:
+        status = str(item.get("status") or "")
+        if event_type == "item.completed" and status not in {"failed", "error"}:
+            return "completed"
+        return status or "running"
+
+    @staticmethod
+    def _dict_value(value: Any) -> dict:
+        if isinstance(value, dict):
+            return value
+        if not isinstance(value, str):
+            return {}
+        parsed = CLIAgentLLM._json_value(value)
+        return parsed if isinstance(parsed, dict) else {}
+
+    @staticmethod
+    def _text_value(value: Any) -> str:
+        if isinstance(value, str):
+            return value
+        if isinstance(value, list):
+            return " ".join(str(item) for item in value)
+        return "" if value is None else str(value)
+
+    @staticmethod
+    def _hermes_database() -> Path:
+        return Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes")) / "state.db"
+
     def _hermes_message_text(self) -> tuple[str, str]:
         if not self.session_id:
             return "", ""
-        database = (
-            Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes")) / "state.db"
-        )
+        database = self._hermes_database()
         if not database.is_file():
             return "", ""
         try:
