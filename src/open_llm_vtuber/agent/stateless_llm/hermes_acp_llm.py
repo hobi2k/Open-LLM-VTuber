@@ -177,6 +177,7 @@ class HermesACPLLM(CLIAgentLLM):
             else self._build_prompt(messages, system)
         )
         prompt = expand_runtime_slash_command(prompt, "hermes", self.workspace_directory)
+        images = self._content_images(self._latest_user_content(messages))
         if self.permission_mode == "plan":
             prompt = (
                 "Plan mode is active. Inspect and reason about the project, but do not "
@@ -242,7 +243,7 @@ class HermesACPLLM(CLIAgentLLM):
 
                 prompt_task = asyncio.create_task(
                     connection.prompt(
-                        prompt=[acp.text_block(prompt)],
+                        prompt=self._acp_prompt(prompt, images),
                         session_id=self.session_id,
                     )
                 )
@@ -322,6 +323,16 @@ class HermesACPLLM(CLIAgentLLM):
                         "Hermes ACP stderr: {}",
                         stderr.decode("utf-8", errors="replace").strip(),
                     )
+
+    @staticmethod
+    def _acp_prompt(prompt: str, images: List[Dict[str, str]]) -> list:
+        return [
+            acp.text_block(prompt),
+            *[
+                acp.image_block(image["data"], image["mime_type"])
+                for image in images
+            ],
+        ]
 
     def _acp_arguments(self) -> list[str]:
         arguments = []

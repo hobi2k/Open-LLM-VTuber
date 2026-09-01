@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Callable, TypedDict
+from typing import Any, Dict, List, Optional, Callable, TypedDict
 from fastapi import WebSocket, WebSocketDisconnect
 import asyncio
 import json
@@ -52,7 +52,7 @@ class WSMessage(TypedDict, total=False):
     action: Optional[str]
     text: Optional[str]
     audio: Optional[List[float]]
-    images: Optional[List[str]]
+    images: Optional[List[Dict[str, Any]]]
     history_uid: Optional[str]
     file: Optional[str]
     display_text: Optional[dict]

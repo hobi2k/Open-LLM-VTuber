@@ -841,6 +841,38 @@ class CLIAgentLLM(StatelessLLMInterface):
             return CLIAgentLLM._content_text(messages[-1].get("content", ""))
         return ""
 
+    @staticmethod
+    def _latest_user_content(messages: List[Dict[str, Any]]) -> Any:
+        for message in reversed(messages):
+            if message.get("role") == "user":
+                return message.get("content", "")
+        return messages[-1].get("content", "") if messages else ""
+
+    @staticmethod
+    def _content_images(content: Any) -> List[Dict[str, str]]:
+        if not isinstance(content, list):
+            return []
+
+        images = []
+        for item in content:
+            if not isinstance(item, dict) or item.get("type") != "image_url":
+                continue
+            image_url = item.get("image_url", {})
+            url = image_url.get("url") if isinstance(image_url, dict) else image_url
+            if not isinstance(url, str) or not url.startswith("data:image/"):
+                continue
+            header, separator, data = url.partition(",")
+            if not separator or ";base64" not in header or not data:
+                continue
+            images.append(
+                {
+                    "url": url,
+                    "mime_type": header[5 : header.index(";")],
+                    "data": data,
+                }
+            )
+        return images
+
     def _resolve_executable(self, executable: str) -> str:
         command = {
             "claude_code": "claude",
@@ -881,9 +913,7 @@ class CLIAgentLLM(StatelessLLMInterface):
                 parts.append(str(item.get("text", "")))
                 continue
             if isinstance(item, dict) and item.get("type") == "image_url":
-                parts.append(
-                    "[An image was attached, but this CLI text adapter cannot inspect it.]"
-                )
+                parts.append("[Attached image]")
                 continue
             parts.append(str(item))
         return "\n".join(parts)

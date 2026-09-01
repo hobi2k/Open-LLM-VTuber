@@ -47,6 +47,10 @@ class ClaudeAgentSDKLLM(CLIAgentLLM):
         prompt = expand_runtime_slash_command(
             prompt, "claude_code", self.workspace_directory
         )
+        sdk_prompt = self._sdk_prompt(
+            prompt,
+            self._content_images(self._latest_user_content(messages)),
+        )
         output: asyncio.Queue[Any] = asyncio.Queue()
         finished = object()
 
@@ -84,7 +88,7 @@ class ClaudeAgentSDKLLM(CLIAgentLLM):
                     max_turns=self._max_turns(),
                 )
                 async with ClaudeSDKClient(options) as client:
-                    await client.query(prompt)
+                    await client.query(sdk_prompt)
                     async for message in client.receive_response():
                         if isinstance(message, ResultMessage):
                             self.session_id = message.session_id or self.session_id
@@ -195,6 +199,38 @@ class ClaudeAgentSDKLLM(CLIAgentLLM):
                 runtime_task,
                 return_exceptions=True,
             )
+
+    @staticmethod
+    def _sdk_prompt(
+        prompt: str, images: List[Dict[str, str]]
+    ) -> str | AsyncIterator[Dict[str, Any]]:
+        if not images:
+            return prompt
+
+        async def stream() -> AsyncIterator[Dict[str, Any]]:
+            yield {
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        *[
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": image["mime_type"],
+                                    "data": image["data"],
+                                },
+                            }
+                            for image in images
+                        ],
+                    ],
+                },
+                "parent_tool_use_id": None,
+            }
+
+        return stream()
 
     def _max_turns(self) -> int | None:
         if self.permission_mode == "disabled":

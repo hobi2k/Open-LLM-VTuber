@@ -25,7 +25,7 @@ from open_llm_vtuber.service_context import ServiceContext
 class AudioSettingsTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.config = validate_config(read_yaml("conf.yaml"))
+        cls.config = validate_config(read_yaml("config_templates/conf.default.yaml"))
 
     def test_payload_reports_active_audio_engines(self):
         context = SimpleNamespace(

@@ -280,6 +280,66 @@ class NativeSessionResumeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(llm.session_id, "native-hermes")
 
 
+class NativeImageInputTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.content = [
+            {"type": "text", "text": "Describe this image"},
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64,AAAA"},
+            },
+        ]
+        self.images = ClaudeAgentSDKLLM._content_images(self.content)
+
+    def test_data_url_is_parsed_once_for_native_runtimes(self):
+        self.assertEqual(
+            self.images,
+            [
+                {
+                    "url": "data:image/png;base64,AAAA",
+                    "mime_type": "image/png",
+                    "data": "AAAA",
+                }
+            ],
+        )
+        self.assertEqual(
+            ClaudeAgentSDKLLM._content_text(self.content),
+            "Describe this image\n[Attached image]",
+        )
+
+    async def test_claude_uses_structured_multimodal_user_message(self):
+        prompt = ClaudeAgentSDKLLM._sdk_prompt("Describe this image", self.images)
+
+        self.assertFalse(isinstance(prompt, str))
+        message = await anext(prompt)
+        self.assertEqual(message["message"]["content"][0]["type"], "text")
+        self.assertEqual(
+            message["message"]["content"][1],
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": "AAAA",
+                },
+            },
+        )
+
+    def test_codex_uses_official_image_turn_input(self):
+        self.assertEqual(
+            CodexAppServerLLM._image_turn_input(self.images),
+            [{"type": "image", "url": "data:image/png;base64,AAAA"}],
+        )
+
+    def test_hermes_uses_acp_image_content_block(self):
+        blocks = HermesACPLLM._acp_prompt("Describe this image", self.images)
+
+        self.assertEqual(blocks[0].type, "text")
+        self.assertEqual(blocks[1].type, "image")
+        self.assertEqual(blocks[1].mime_type, "image/png")
+        self.assertEqual(blocks[1].data, "AAAA")
+
+
 class HermesACPConfigurationTest(unittest.IsolatedAsyncioTestCase):
     def _llm(self, permission_mode="manual", launch_mode="direct"):
         return HermesACPLLM(

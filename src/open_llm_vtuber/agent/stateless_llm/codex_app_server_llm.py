@@ -35,6 +35,7 @@ class CodexAppServerLLM(CLIAgentLLM):
             if self.session_id or self.interaction_mode == "coding"
             else self._build_prompt(messages, system)
         )
+        images = self._content_images(self._latest_user_content(messages))
         slash_command = codex_slash_command(prompt)
         process = None
         stderr_task = None
@@ -73,7 +74,10 @@ class CodexAppServerLLM(CLIAgentLLM):
             await self._write_json(process, {"method": "initialized", "params": {}})
 
             request_id = 2
-            turn_input = [{"type": "text", "text": prompt}]
+            turn_input = [
+                {"type": "text", "text": prompt},
+                *self._image_turn_input(images),
+            ]
             if slash_command:
                 skill_result = await self._request(
                     process,
@@ -83,7 +87,10 @@ class CodexAppServerLLM(CLIAgentLLM):
                     backlog,
                 )
                 request_id += 1
-                turn_input = self._skill_turn_input(prompt, skill_result)
+                turn_input = [
+                    *self._skill_turn_input(prompt, skill_result),
+                    *self._image_turn_input(images),
+                ]
 
             thread_params = {
                 "cwd": self.workspace_directory,
@@ -437,6 +444,10 @@ class CodexAppServerLLM(CLIAgentLLM):
         if self.permission_mode in {"manual", "auto"}:
             return "workspace-write"
         return "read-only"
+
+    @staticmethod
+    def _image_turn_input(images: list[dict[str, str]]) -> list[dict[str, str]]:
+        return [{"type": "image", "url": image["url"]} for image in images]
 
     @staticmethod
     def _skill_turn_input(prompt: str, skill_result: dict) -> list[dict[str, str]]:
