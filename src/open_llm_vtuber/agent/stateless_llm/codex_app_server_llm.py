@@ -42,7 +42,6 @@ class CodexAppServerLLM(CLIAgentLLM):
         reasoning_started = False
         text_started = False
         backlog: list[dict[str, Any]] = []
-        deadline = asyncio.get_running_loop().time() + self.timeout
 
         try:
             process = await asyncio.create_subprocess_exec(
@@ -69,7 +68,6 @@ class CodexAppServerLLM(CLIAgentLLM):
                     },
                     "capabilities": {"experimentalApi": True},
                 },
-                deadline,
                 backlog,
             )
             await self._write_json(process, {"method": "initialized", "params": {}})
@@ -82,7 +80,6 @@ class CodexAppServerLLM(CLIAgentLLM):
                     request_id,
                     "skills/list",
                     {"cwds": [self.workspace_directory], "forceReload": False},
-                    deadline,
                     backlog,
                 )
                 request_id += 1
@@ -107,7 +104,6 @@ class CodexAppServerLLM(CLIAgentLLM):
                     request_id,
                     "thread/resume",
                     thread_params,
-                    deadline,
                     backlog,
                 )
             else:
@@ -116,7 +112,6 @@ class CodexAppServerLLM(CLIAgentLLM):
                     request_id,
                     "thread/start",
                     thread_params,
-                    deadline,
                     backlog,
                 )
             thread = thread_result.get("thread", {})
@@ -162,15 +157,13 @@ class CodexAppServerLLM(CLIAgentLLM):
                 message = (
                     backlog.pop(0)
                     if backlog
-                    else await self._read_json(process, deadline)
+                    else await self._read_json(process)
                 )
                 method = message.get("method")
                 params = message.get("params", {})
 
                 if "id" in message and isinstance(method, str):
-                    async for event in self._handle_server_request(
-                        process, message, deadline
-                    ):
+                    async for event in self._handle_server_request(process, message):
                         yield event
                     continue
 
@@ -228,11 +221,6 @@ class CodexAppServerLLM(CLIAgentLLM):
                 yield self._reasoning_event("reasoning-end", reasoning_id)
             if not text_started:
                 raise RuntimeError("Codex completed without an assistant response")
-        except asyncio.TimeoutError:
-            logger.error("Codex app-server timed out after {} seconds", self.timeout)
-            if reasoning_started:
-                yield self._reasoning_event("reasoning-end", reasoning_id)
-            yield "Codex timed out. Check the runtime settings."
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -261,7 +249,6 @@ class CodexAppServerLLM(CLIAgentLLM):
         self,
         process: asyncio.subprocess.Process,
         message: dict[str, Any],
-        deadline: float,
     ) -> AsyncIterator[dict[str, Any]]:
         method = str(message.get("method") or "")
         params = message.get("params", {})
@@ -270,7 +257,6 @@ class CodexAppServerLLM(CLIAgentLLM):
             async for event in self._handle_user_input_request(
                 process,
                 message,
-                deadline,
             ):
                 yield event
             return
@@ -306,10 +292,7 @@ class CodexAppServerLLM(CLIAgentLLM):
         )
         if self.permission_mode == "manual":
             yield await self._permission_bridge.events.get()
-        remaining = deadline - asyncio.get_running_loop().time()
-        if remaining <= 0:
-            raise asyncio.TimeoutError
-        reply = await asyncio.wait_for(reply_task, remaining)
+        reply = await reply_task
 
         if method == "item/permissions/requestApproval":
             result = {
@@ -337,7 +320,6 @@ class CodexAppServerLLM(CLIAgentLLM):
         self,
         process: asyncio.subprocess.Process,
         message: dict[str, Any],
-        deadline: float,
     ) -> AsyncIterator[dict[str, Any]]:
         params = message.get("params", {})
         questions = params.get("questions", [])
@@ -364,10 +346,7 @@ class CodexAppServerLLM(CLIAgentLLM):
             )
         )
         yield await self._permission_bridge.events.get()
-        remaining = deadline - asyncio.get_running_loop().time()
-        if remaining <= 0:
-            raise asyncio.TimeoutError
-        reply = await asyncio.wait_for(reply_task, remaining)
+        reply = await reply_task
 
         answer_values: dict[str, list[str]] = {}
         if reply.decision != "reject" and reply.message.strip():
@@ -408,7 +387,6 @@ class CodexAppServerLLM(CLIAgentLLM):
         request_id: int,
         method: str,
         params: dict[str, Any],
-        deadline: float,
         backlog: list[dict[str, Any]],
     ) -> dict[str, Any]:
         await self._write_json(
@@ -416,7 +394,7 @@ class CodexAppServerLLM(CLIAgentLLM):
             {"id": request_id, "method": method, "params": params},
         )
         while True:
-            message = await self._read_json(process, deadline)
+            message = await self._read_json(process)
             if message.get("id") != request_id or "method" in message:
                 backlog.append(message)
                 continue
@@ -436,16 +414,10 @@ class CodexAppServerLLM(CLIAgentLLM):
         await process.stdin.drain()
 
     @staticmethod
-    async def _read_json(
-        process: asyncio.subprocess.Process,
-        deadline: float,
-    ) -> dict[str, Any]:
+    async def _read_json(process: asyncio.subprocess.Process) -> dict[str, Any]:
         if process.stdout is None:
             raise RuntimeError("Codex app-server stdout is unavailable")
-        remaining = deadline - asyncio.get_running_loop().time()
-        if remaining <= 0:
-            raise asyncio.TimeoutError
-        line = await asyncio.wait_for(process.stdout.readline(), remaining)
+        line = await process.stdout.readline()
         if not line:
             raise RuntimeError("Codex app-server closed unexpectedly")
         try:

@@ -1,7 +1,6 @@
 import asyncio
 import json
 import tempfile
-import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -370,7 +369,6 @@ class CodexUserInputTest(unittest.IsolatedAsyncioTestCase):
                     ]
                 },
             },
-            time.monotonic() + 5,
         )
 
         event = await anext(handler)
@@ -391,6 +389,20 @@ class CodexUserInputTest(unittest.IsolatedAsyncioTestCase):
                     "answers": {"scope": {"answers": ["workspace"]}}
                 },
             },
+        )
+
+    async def test_codex_read_waits_without_an_internal_timeout(self):
+        class Stdout:
+            async def readline(self):
+                await asyncio.sleep(0.02)
+                return b'{"id": 1, "result": {}}\n'
+
+        class Process:
+            stdout = Stdout()
+
+        self.assertEqual(
+            await asyncio.wait_for(CodexAppServerLLM._read_json(Process()), 1),
+            {"id": 1, "result": {}},
         )
 
     def test_codex_skill_uses_structured_app_server_input(self):

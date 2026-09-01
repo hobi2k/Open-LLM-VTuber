@@ -198,7 +198,6 @@ class HermesACPLLM(CLIAgentLLM):
         text_started = False
         arguments = self._acp_arguments()
         environment = self._acp_environment()
-        deadline = asyncio.get_running_loop().time() + self.timeout
         stderr_task = None
         prompt_task = None
         event_task = None
@@ -252,16 +251,10 @@ class HermesACPLLM(CLIAgentLLM):
                     self._permission_bridge.events.get()
                 )
                 while True:
-                    remaining = deadline - asyncio.get_running_loop().time()
-                    if remaining <= 0:
-                        raise asyncio.TimeoutError
                     done, _ = await asyncio.wait(
                         {prompt_task, event_task, permission_task},
-                        timeout=remaining,
                         return_when=asyncio.FIRST_COMPLETED,
                     )
-                    if not done:
-                        raise asyncio.TimeoutError
                     if event_task in done:
                         event = event_task.result()
                         event_task = asyncio.create_task(client.events.get())
@@ -304,11 +297,6 @@ class HermesACPLLM(CLIAgentLLM):
                     yield self._reasoning_event("reasoning-end", reasoning_id)
                 if not text_started:
                     raise RuntimeError("Hermes completed without an assistant response")
-        except asyncio.TimeoutError:
-            logger.error("Hermes ACP timed out after {} seconds", self.timeout)
-            if reasoning_started:
-                yield self._reasoning_event("reasoning-end", reasoning_id)
-            yield "Hermes timed out. Check the runtime settings."
         except asyncio.CancelledError:
             raise
         except Exception as error:

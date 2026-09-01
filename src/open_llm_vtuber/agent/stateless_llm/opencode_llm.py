@@ -97,7 +97,7 @@ class OpenCodeLLM(StatelessLLMInterface):
                 self.server_username or "opencode", self.server_password
             )
 
-        timeout = httpx.Timeout(self.timeout, connect=min(self.timeout, 10))
+        timeout = httpx.Timeout(None, connect=min(self.timeout, 10))
         async with httpx.AsyncClient(
             base_url=self.base_url,
             timeout=timeout,
