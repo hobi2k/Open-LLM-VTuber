@@ -118,6 +118,168 @@ class NativeAdapterFactoryTest(unittest.TestCase):
         self.assertIsInstance(self._create("hermes_cli_llm"), HermesACPLLM)
 
 
+class NativeSessionResumeTest(unittest.IsolatedAsyncioTestCase):
+    async def test_claude_resumes_selected_session_without_replaying_history(self):
+        class Client:
+            options = None
+            prompt = None
+
+            def __init__(self, options):
+                Client.options = options
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def query(self, prompt):
+                Client.prompt = prompt
+
+            async def receive_response(self):
+                yield ResultMessage(
+                    subtype="success",
+                    duration_ms=1,
+                    duration_api_ms=1,
+                    is_error=False,
+                    num_turns=1,
+                    session_id="native-claude",
+                    result="continued",
+                )
+
+        llm = ClaudeAgentSDKLLM(
+            runtime="claude_code",
+            executable="/usr/bin/true",
+            workspace_directory=tempfile.gettempdir(),
+            permission_mode="disabled",
+            session_id="native-claude",
+        )
+        with patch(
+            "open_llm_vtuber.agent.stateless_llm.claude_agent_sdk_llm.ClaudeSDKClient",
+            Client,
+        ):
+            chunks = [
+                chunk
+                async for chunk in llm.chat_completion(
+                    [
+                        {"role": "assistant", "content": "Native history"},
+                        {"role": "user", "content": "Continue here"},
+                    ]
+                )
+            ]
+
+        self.assertEqual(chunks, ["continued"])
+        self.assertEqual(Client.options.resume, "native-claude")
+        self.assertEqual(Client.prompt, "Continue here")
+        self.assertEqual(llm.session_id, "native-claude")
+
+    async def test_codex_resumes_selected_thread_without_starting_a_copy(self):
+        process = SimpleNamespace(
+            returncode=0,
+            stderr=SimpleNamespace(read=AsyncMock(return_value=b"")),
+        )
+        llm = CodexAppServerLLM(
+            runtime="codex",
+            executable="/usr/bin/true",
+            workspace_directory=tempfile.gettempdir(),
+            permission_mode="manual",
+            session_id="native-codex",
+        )
+        methods = []
+
+        async def request(_process, _request_id, method, params, _backlog):
+            methods.append((method, params))
+            if method == "initialize":
+                return {}
+            if method == "thread/resume":
+                return {"thread": {"id": "native-codex"}}
+            raise AssertionError(f"Unexpected Codex method: {method}")
+
+        messages = [
+            {
+                "method": "item/completed",
+                "params": {"item": {"type": "agentMessage", "text": "continued"}},
+            },
+            {"method": "turn/completed", "params": {"turn": {"status": "completed"}}},
+        ]
+        with (
+            patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)),
+            patch.object(llm, "_request", side_effect=request),
+            patch.object(llm, "_write_json", AsyncMock()),
+            patch.object(llm, "_read_json", AsyncMock(side_effect=messages)),
+        ):
+            chunks = [
+                chunk
+                async for chunk in llm.chat_completion(
+                    [
+                        {"role": "assistant", "content": "Native history"},
+                        {"role": "user", "content": "Continue here"},
+                    ]
+                )
+            ]
+
+        self.assertEqual(chunks, ["continued"])
+        self.assertNotIn("thread/start", [method for method, _ in methods])
+        resume = next(params for method, params in methods if method == "thread/resume")
+        self.assertEqual(resume["threadId"], "native-codex")
+        self.assertEqual(llm.session_id, "native-codex")
+
+    async def test_hermes_loads_selected_session_without_creating_a_copy(self):
+        connection = SimpleNamespace(
+            initialize=AsyncMock(),
+            load_session=AsyncMock(
+                return_value=SimpleNamespace(session_id="native-hermes")
+            ),
+            new_session=AsyncMock(),
+            set_session_mode=AsyncMock(),
+            prompt=None,
+        )
+        process = SimpleNamespace(stderr=None)
+
+        class Spawned:
+            def __init__(self, client):
+                async def prompt(**_kwargs):
+                    await client.events.put("continued")
+
+                connection.prompt = prompt
+
+            async def __aenter__(self):
+                return connection, process
+
+            async def __aexit__(self, *_args):
+                return None
+
+        llm = HermesACPLLM(
+            runtime="hermes",
+            executable="/usr/bin/true",
+            workspace_directory=tempfile.gettempdir(),
+            permission_mode="manual",
+            session_id="native-hermes",
+        )
+        with patch(
+            "open_llm_vtuber.agent.stateless_llm.hermes_acp_llm.acp.spawn_agent_process",
+            side_effect=lambda client, *_args, **_kwargs: Spawned(client),
+        ):
+            chunks = [
+                chunk
+                async for chunk in llm.chat_completion(
+                    [
+                        {"role": "assistant", "content": "Native history"},
+                        {"role": "user", "content": "Continue here"},
+                    ]
+                )
+            ]
+
+        self.assertEqual(chunks, ["continued"])
+        connection.load_session.assert_awaited_once_with(
+            cwd=llm.workspace_directory,
+            session_id="native-hermes",
+            mcp_servers=[],
+        )
+        connection.new_session.assert_not_awaited()
+        self.assertEqual(llm.session_id, "native-hermes")
+
+
 class HermesACPConfigurationTest(unittest.IsolatedAsyncioTestCase):
     def _llm(self, permission_mode="manual", launch_mode="direct"):
         return HermesACPLLM(

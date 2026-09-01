@@ -390,6 +390,34 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_selected_native_session_is_resumed_without_creating_a_copy(self):
+        llm = self._llm(session_id="ses_test")
+
+        chunks = [
+            chunk
+            async for chunk in llm.chat_completion(
+                [
+                    {"role": "assistant", "content": "Native session history"},
+                    {"role": "user", "content": "Continue this session"},
+                ]
+            )
+        ]
+
+        self.assertEqual("".join(chunks), "안녕하세요")
+        self.assertEqual(llm.session_id, "ses_test")
+        self.assertFalse(
+            any(
+                method == "POST" and path == "/session"
+                for method, path, _ in OpenCodeHandler.requests
+            )
+        )
+        prompt = next(
+            body
+            for method, path, body in OpenCodeHandler.requests
+            if method == "POST" and path == "/session/ses_test/prompt_async"
+        )
+        self.assertEqual(prompt["parts"][0]["text"], "Continue this session")
+
     async def test_uses_final_text_when_provider_sends_no_deltas(self):
         OpenCodeHandler.use_deltas = False
         chunks = [
@@ -635,6 +663,7 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
         show_reasoning=False,
         interaction_mode="character",
         workspace_directory=".",
+        session_id="",
     ):
         return OpenCodeLLM(
             base_url=f"http://127.0.0.1:{self.server.server_port}",
@@ -647,6 +676,7 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
             permission_mode=permission_mode,
             show_reasoning=show_reasoning,
             interaction_mode=interaction_mode,
+            session_id=session_id,
         )
 
 
