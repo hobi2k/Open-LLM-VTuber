@@ -398,7 +398,7 @@ def _codex_sessions(home: Path | None = None) -> list[dict]:
     path = (home or Path.home()) / ".codex/state_5.sqlite"
     return _sqlite_sessions(
         path,
-        "SELECT id, COALESCE(NULLIF(title, ''), NULLIF(name, ''), "
+        "SELECT id, COALESCE(NULLIF(name, ''), NULLIF(title, ''), "
         "NULLIF(first_user_message, ''), 'Untitled conversation'), cwd, "
         "updated_at, 'codex' FROM threads WHERE archived = 0 "
         "ORDER BY updated_at DESC",
@@ -453,6 +453,13 @@ def _claude_sessions(home: Path | None = None) -> list[dict]:
         title = "Untitled conversation"
         workspace = ""
         session_id = path.stem
+        custom_title_path = path.with_suffix("") / "custom-title.json"
+        with suppress(OSError, json.JSONDecodeError, TypeError):
+            custom_title = json.loads(
+                custom_title_path.read_text(encoding="utf-8")
+            ).get("customTitle")
+            if str(custom_title or "").strip():
+                title = str(custom_title)
         with suppress(OSError, json.JSONDecodeError):
             with path.open(encoding="utf-8") as stream:
                 for line in stream:
@@ -470,12 +477,13 @@ def _claude_sessions(home: Path | None = None) -> list[dict]:
                             if isinstance(item, dict) and item.get("type") == "text"
                         )
                     if str(content).strip():
-                        title = str(content).strip().replace("\n", " ")[:100]
+                        if title == "Untitled conversation":
+                            title = str(content).strip().replace("\n", " ")[:100]
                         break
         sessions.append(
             {
                 "id": session_id,
-                "title": title,
+                "title": _session_title(title),
                 "workspace": workspace,
                 "updated_at": path.stat().st_mtime,
                 "source": "claude_code",
