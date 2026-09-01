@@ -9,8 +9,10 @@ from .stateless_llm.stateless_llm_with_template import (
 from .stateless_llm.openai_compatible_llm import AsyncLLM as OpenAICompatibleLLM
 from .stateless_llm.ollama_llm import OllamaLLM
 from .stateless_llm.claude_llm import AsyncLLM as ClaudeLLM
+from .stateless_llm.claude_agent_sdk_llm import ClaudeAgentSDKLLM
+from .stateless_llm.codex_app_server_llm import CodexAppServerLLM
+from .stateless_llm.hermes_acp_llm import HermesACPLLM
 from .stateless_llm.opencode_llm import OpenCodeLLM
-from .stateless_llm.cli_agent_llm import CLIAgentLLM
 
 
 class LLMFactory:
@@ -75,13 +77,19 @@ class LLMFactory:
                 timeout=kwargs.get("timeout"),
                 keep_sessions=kwargs.get("keep_sessions"),
                 allow_tools=kwargs.get("allow_tools"),
+                permission_mode=kwargs.get("permission_mode"),
                 show_reasoning=kwargs.get("show_reasoning", False),
                 server_username=kwargs.get("server_username"),
                 server_password=kwargs.get("server_password"),
             )
 
         if llm_provider in {"claude_code_llm", "codex_cli_llm", "hermes_cli_llm"}:
-            return CLIAgentLLM(
+            adapter = {
+                "claude_code_llm": ClaudeAgentSDKLLM,
+                "codex_cli_llm": CodexAppServerLLM,
+                "hermes_cli_llm": HermesACPLLM,
+            }[llm_provider]
+            return adapter(
                 runtime={
                     "claude_code_llm": "claude_code",
                     "codex_cli_llm": "codex",
@@ -98,6 +106,7 @@ class LLMFactory:
                 show_reasoning=kwargs.get("show_reasoning", False),
                 reasoning_effort=kwargs.get("reasoning_effort", "default"),
                 allow_tools=kwargs.get("allow_tools", False),
+                permission_mode=kwargs.get("permission_mode"),
             )
 
         elif llm_provider == "llama_cpp_llm":

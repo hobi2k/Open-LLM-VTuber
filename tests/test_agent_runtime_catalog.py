@@ -13,12 +13,17 @@ from open_llm_vtuber.agent_runtime_catalog import (
     _codex_models,
     _codex_sessions,
     _hermes_sessions,
+    _merge_commands,
     _merge_models,
     _merge_sessions,
     _opencode_local_sessions,
     _opencode_catalog,
     _project,
     _runtime_configs,
+)
+from open_llm_vtuber.agent_runtime_commands import (
+    expand_runtime_slash_command,
+    local_runtime_commands,
 )
 from open_llm_vtuber.agent_runtime_settings import (
     AgentRuntimeSettingsUpdate,
@@ -201,6 +206,77 @@ class AgentRuntimeCatalogTest(unittest.TestCase):
         self.assertEqual(codex.workspace_directory, "/current/codex")
         self.assertEqual(hermes.workspace_directory, "/current/hermes")
 
+    def test_runtime_commands_include_workspace_and_user_skills(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            skill = workspace / ".claude/skills/release/SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text(
+                "---\nname: release\ndescription: Prepare a release\n---\n"
+                "Verify $ARGUMENTS",
+                encoding="utf-8",
+            )
+
+            commands = local_runtime_commands(
+                "claude_code", str(workspace), root / "home"
+            )
+            expanded = expand_runtime_slash_command(
+                "/release frontend", "claude_code", str(workspace)
+            )
+
+        self.assertEqual(commands[0]["name"], "release")
+        self.assertEqual(commands[0]["source"], "skill")
+        self.assertIn("Verify frontend", expanded)
+
+    def test_opencode_commands_and_skills_load_without_server(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            command = workspace / ".opencode/commands/review.md"
+            command.parent.mkdir(parents=True)
+            command.write_text(
+                "---\ndescription: Review changes\n---\nReview $ARGUMENTS",
+                encoding="utf-8",
+            )
+            skill = root / "home/.config/opencode/skills/release/SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text(
+                "---\nname: release\ndescription: Prepare release\n---\nShip $ARGUMENTS",
+                encoding="utf-8",
+            )
+
+            commands = local_runtime_commands("opencode", str(workspace), root / "home")
+
+        self.assertEqual([item["name"] for item in commands], ["release", "review"])
+        self.assertEqual(commands[0]["source"], "skill")
+        self.assertEqual(commands[1]["source"], "command")
+
+    def test_native_opencode_command_wins_over_local_fallback(self):
+        commands = _merge_commands(
+            [{"name": "review", "description": "Native"}],
+            [
+                {"name": "review", "description": "Local"},
+                {"name": "release", "description": "Local release"},
+            ],
+        )
+
+        self.assertEqual([item["name"] for item in commands], ["release", "review"])
+        self.assertEqual(commands[1]["description"], "Native")
+
+    def test_codex_skill_invocation_uses_native_dollar_syntax(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            skill = workspace / ".codex/skills/review/SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text("---\nname: review\n---\nReview changes", encoding="utf-8")
+
+            expanded = expand_runtime_slash_command(
+                "/review staged", "codex", str(workspace)
+            )
+
+        self.assertEqual(expanded, "$review staged")
+
     @staticmethod
     def _create_codex_sessions(home: Path, count: int):
         path = home / ".codex/state_5.sqlite"
@@ -279,6 +355,18 @@ class OpenCodeCatalogHandler(BaseHTTPRequestHandler):
                 ]
             )
             return
+        if request.path == "/command":
+            self._json(
+                [
+                    {
+                        "name": "review",
+                        "description": "Review changes",
+                        "source": "command",
+                        "hints": ["$ARGUMENTS"],
+                    }
+                ]
+            )
+            return
         if request.path == "/session":
             directory = parse_qs(request.query)["directory"][0]
             self.directories.append(directory)
@@ -331,6 +419,7 @@ class OpenCodeCatalogTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(len(result["sessions"]), 3)
+        self.assertEqual(result["commands"][0]["name"], "review")
         self.assertEqual(
             set(OpenCodeCatalogHandler.directories),
             {"/workspace/current", "/workspace/one", "/workspace/two"},

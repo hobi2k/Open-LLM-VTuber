@@ -1,7 +1,9 @@
 """OpenCode session API adapter for Open-LLM-VTuber."""
 
+import asyncio
 import json
 import mimetypes
+import re
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Union
@@ -9,7 +11,12 @@ from typing import Any, AsyncIterator, Dict, List, Union
 import httpx
 from loguru import logger
 
+from ...agent_runtime_commands import (
+    expand_runtime_slash_command,
+    local_runtime_commands,
+)
 from .agent_activity import tool_activity
+from .permission_bridge import PermissionMode, permission_mode_from_legacy
 from .stateless_llm_interface import StatelessLLMInterface
 
 
@@ -32,6 +39,7 @@ class OpenCodeLLM(StatelessLLMInterface):
         timeout: float = 300,
         keep_sessions: bool = False,
         allow_tools: bool = False,
+        permission_mode: PermissionMode | None = None,
         show_reasoning: bool = False,
         server_username: str | None = None,
         server_password: str | None = None,
@@ -45,11 +53,17 @@ class OpenCodeLLM(StatelessLLMInterface):
         self.workspace_directory = str(Path(workspace_directory).expanduser().resolve())
         self.timeout = timeout
         self.keep_sessions = keep_sessions
-        self.allow_tools = allow_tools
+        self.permission_mode = permission_mode_from_legacy(
+            permission_mode, allow_tools
+        )
+        self.allow_tools = self.permission_mode != "disabled"
         self.show_reasoning = show_reasoning
         self.server_username = server_username
         self.server_password = server_password
         self.support_tools = False
+        self._pending_permissions: set[str] = set()
+        self._pending_questions: dict[str, list[str]] = {}
+        self._permission_rejected = False
 
         logger.info(
             "Initialized OpenCodeLLM at {} with {}/{} (agent: {})",
@@ -72,7 +86,11 @@ class OpenCodeLLM(StatelessLLMInterface):
             )
 
         session_id = self.session_id or None
+        self._pending_permissions.clear()
+        self._pending_questions.clear()
+        self._permission_rejected = False
         completed = False
+        command_task = None
         auth = None
         if self.server_password:
             auth = httpx.BasicAuth(
@@ -90,8 +108,11 @@ class OpenCodeLLM(StatelessLLMInterface):
                 if not session_id:
                     session_id = await self._create_session(client)
                     self.session_id = session_id
+                else:
+                    await self._configure_session(client, session_id)
+                prompt_messages, slash_command = self._prepare_slash_command(messages)
                 prompt_parts = self._build_prompt_parts(
-                    messages,
+                    prompt_messages,
                     continuing or self.interaction_mode == "coding",
                 )
 
@@ -103,11 +124,12 @@ class OpenCodeLLM(StatelessLLMInterface):
                     event_response.raise_for_status()
                     event_lines = event_response.aiter_lines()
                     await self._wait_until_connected(event_lines)
-                    await self._start_prompt(
+                    command_task = await self._start_prompt(
                         client,
                         session_id,
                         prompt_parts,
                         system if self.interaction_mode == "character" else None,
+                        slash_command,
                     )
 
                     emitted_text = False
@@ -119,11 +141,18 @@ class OpenCodeLLM(StatelessLLMInterface):
                             emitted_text = True
                         yield chunk
 
+                if command_task:
+                    command_response = await command_task
+                    command_response.raise_for_status()
+
                 completed = True
                 if not emitted_text:
                     fallback = await self._last_assistant_text(client, session_id)
                     if fallback:
                         yield fallback
+                        return
+                    if self._permission_rejected:
+                        yield "The requested action was rejected. No changes were made."
                         return
                     raise RuntimeError(
                         "OpenCode completed without an assistant response"
@@ -143,6 +172,9 @@ class OpenCodeLLM(StatelessLLMInterface):
                 logger.error("OpenCode chat request failed: {}", exc)
                 yield "Could not get a response from OpenCode. Check that OpenCode is running."
             finally:
+                if command_task and not command_task.done():
+                    command_task.cancel()
+                    await asyncio.gather(command_task, return_exceptions=True)
                 if session_id and not completed:
                     with suppress(httpx.HTTPError):
                         await client.post(
@@ -157,17 +189,10 @@ class OpenCodeLLM(StatelessLLMInterface):
                 if self.interaction_mode == "coding"
                 else "Open-LLM-VTuber conversation"
             ),
-            "agent": (
-                "build"
-                if self.interaction_mode == "coding" and self.agent == "vtuber"
-                else self.agent
-            ),
+            "agent": self._selected_agent(),
             "model": {"providerID": self.provider_id, "id": self.model},
         }
-        if not self.allow_tools:
-            payload["permission"] = [
-                {"permission": "*", "pattern": "*", "action": "deny"}
-            ]
+        payload["permission"] = self._permission_rules()
 
         response = await client.post(
             "/session",
@@ -180,20 +205,58 @@ class OpenCodeLLM(StatelessLLMInterface):
             raise ValueError("OpenCode did not return a session ID")
         return session_id
 
+    async def _configure_session(
+        self,
+        client: httpx.AsyncClient,
+        session_id: str,
+    ) -> None:
+        response = await client.patch(
+            f"/session/{session_id}",
+            params={"directory": self.workspace_directory},
+            json={"permission": self._permission_rules()},
+        )
+        response.raise_for_status()
+
+    def _permission_rules(self) -> list[dict[str, str]]:
+        if self.permission_mode == "disabled":
+            return [{"permission": "*", "pattern": "*", "action": "deny"}]
+        if self.permission_mode == "manual":
+            return [{"permission": "*", "pattern": "*", "action": "ask"}]
+        if self.permission_mode == "auto":
+            return [{"permission": "*", "pattern": "*", "action": "allow"}]
+        return [
+            {"permission": "*", "pattern": "*", "action": "deny"},
+            {"permission": "read", "pattern": "*", "action": "allow"},
+            {"permission": "glob", "pattern": "*", "action": "allow"},
+            {"permission": "grep", "pattern": "*", "action": "allow"},
+            {"permission": "list", "pattern": "*", "action": "allow"},
+            {"permission": "lsp", "pattern": "*", "action": "allow"},
+        ]
+
     async def _start_prompt(
         self,
         client: httpx.AsyncClient,
         session_id: str,
         parts: List[Dict[str, Any]],
         system: str | None,
-    ) -> None:
+        slash_command: tuple[str, str] | None = None,
+    ) -> asyncio.Task[httpx.Response] | None:
+        if slash_command:
+            name, arguments = slash_command
+            return asyncio.create_task(
+                client.post(
+                    f"/session/{session_id}/command",
+                    params={"directory": self.workspace_directory},
+                    json={
+                        "command": name,
+                        "arguments": arguments,
+                        "agent": self._selected_agent(),
+                    },
+                )
+            )
         payload: Dict[str, Any] = {
             "model": {"providerID": self.provider_id, "modelID": self.model},
-            "agent": (
-                "build"
-                if self.interaction_mode == "coding" and self.agent == "vtuber"
-                else self.agent
-            ),
+            "agent": self._selected_agent(),
             "parts": parts,
         }
         if system:
@@ -205,6 +268,57 @@ class OpenCodeLLM(StatelessLLMInterface):
             json=payload,
         )
         response.raise_for_status()
+        return None
+
+    @staticmethod
+    def _slash_command(messages: List[Dict[str, Any]]) -> tuple[str, str] | None:
+        for message in reversed(messages):
+            if message.get("role") != "user":
+                continue
+            content = message.get("content")
+            if not isinstance(content, str):
+                return None
+            match = re.match(r"^/([^\s]+)(?:\s+(.*))?$", content.strip(), re.DOTALL)
+            if not match:
+                return None
+            return match.group(1), (match.group(2) or "").strip()
+        return None
+
+    def _prepare_slash_command(
+        self,
+        messages: List[Dict[str, Any]],
+    ) -> tuple[List[Dict[str, Any]], tuple[str, str] | None]:
+        slash_command = self._slash_command(messages)
+        if slash_command is None:
+            return messages, None
+        name, _ = slash_command
+        command = next(
+            (
+                item
+                for item in local_runtime_commands(
+                    "opencode", self.workspace_directory
+                )
+                if item["name"] == name
+            ),
+            None,
+        )
+        if command is None or command["source"] != "skill":
+            return messages, slash_command
+
+        user_index = next(
+            index
+            for index in range(len(messages) - 1, -1, -1)
+            if messages[index].get("role") == "user"
+        )
+        expanded = expand_runtime_slash_command(
+            str(messages[user_index]["content"]),
+            "opencode",
+            self.workspace_directory,
+        )
+        return [
+            {**message, "content": expanded} if index == user_index else message
+            for index, message in enumerate(messages)
+        ], None
 
     @staticmethod
     async def _wait_until_connected(event_lines) -> None:
@@ -230,6 +344,87 @@ class OpenCodeLLM(StatelessLLMInterface):
 
             properties = event.get("properties", {})
             if properties.get("sessionID") != session_id:
+                continue
+
+            if event.get("type") == "permission.asked":
+                request_id = properties.get("id")
+                if not isinstance(request_id, str) or not request_id:
+                    continue
+                if self.permission_mode == "auto":
+                    await self._reply_permission(request_id, "always")
+                    continue
+                if self.permission_mode in {"disabled", "plan"}:
+                    await self._reply_permission(request_id, "reject")
+                    continue
+                self._pending_permissions.add(request_id)
+                yield {
+                    "type": "permission-request",
+                    "request_id": request_id,
+                    "runtime": "opencode",
+                    "tool_name": properties.get("permission") or "tool",
+                    "title": properties.get("permission") or "Permission request",
+                    "description": "\n".join(properties.get("patterns") or []),
+                    "input": properties.get("metadata") or {},
+                    "options": [
+                        {"id": "once", "label": "Allow once"},
+                        {"id": "always", "label": "Allow for session"},
+                        {"id": "reject", "label": "Reject"},
+                    ],
+                }
+                continue
+
+            if event.get("type") == "permission.replied":
+                request_id = properties.get("requestID")
+                if isinstance(request_id, str):
+                    self._pending_permissions.discard(request_id)
+                continue
+
+            if event.get("type") == "question.asked":
+                request_id = properties.get("id")
+                questions = properties.get("questions")
+                if (
+                    not isinstance(request_id, str)
+                    or not request_id
+                    or not isinstance(questions, list)
+                ):
+                    continue
+                normalized_questions = [
+                    {
+                        **question,
+                        "id": str(question.get("id") or index),
+                    }
+                    for index, question in enumerate(questions)
+                    if isinstance(question, dict)
+                ]
+                self._pending_questions[request_id] = [
+                    question["id"] for question in normalized_questions
+                ]
+                yield {
+                    "type": "permission-request",
+                    "request_id": request_id,
+                    "runtime": "opencode",
+                    "tool_name": "user_input",
+                    "title": (
+                        str(normalized_questions[0].get("header") or "Question")
+                        if normalized_questions
+                        else "Question"
+                    ),
+                    "description": "\n".join(
+                        str(question.get("question") or "")
+                        for question in normalized_questions
+                    ).strip(),
+                    "input": {"questions": normalized_questions},
+                    "options": [
+                        {"id": "once", "label": "Submit answer"},
+                        {"id": "reject", "label": "Cancel"},
+                    ],
+                }
+                continue
+
+            if event.get("type") in {"question.replied", "question.rejected"}:
+                request_id = properties.get("requestID")
+                if isinstance(request_id, str):
+                    self._pending_questions.pop(request_id, None)
                 continue
 
             if event.get("type") == "message.updated":
@@ -310,6 +505,118 @@ class OpenCodeLLM(StatelessLLMInterface):
                 return
 
         raise RuntimeError("OpenCode event stream closed before the response completed")
+
+    async def respond_to_permission(
+        self,
+        request_id: str,
+        decision: str,
+        message: str = "",
+    ) -> bool:
+        question_ids = self._pending_questions.get(request_id)
+        if question_ids is not None:
+            if decision not in {"once", "reject"}:
+                return False
+            await self._reply_question(request_id, decision, message, question_ids)
+            self._pending_questions.pop(request_id, None)
+            return True
+        if request_id not in self._pending_permissions:
+            return False
+        if decision not in {"once", "always", "reject"}:
+            return False
+        await self._reply_permission(request_id, decision, message)
+        if decision == "reject":
+            self._permission_rejected = True
+        self._pending_permissions.discard(request_id)
+        return True
+
+    async def _reply_question(
+        self,
+        request_id: str,
+        decision: str,
+        message: str,
+        question_ids: list[str],
+    ) -> None:
+        auth = None
+        if self.server_password:
+            auth = httpx.BasicAuth(
+                self.server_username or "opencode", self.server_password
+            )
+        async with httpx.AsyncClient(
+            base_url=self.base_url,
+            timeout=min(self.timeout, 30),
+            auth=auth,
+        ) as client:
+            if decision == "reject":
+                response = await client.post(
+                    f"/question/{request_id}/reject",
+                    params={"directory": self.workspace_directory},
+                )
+            else:
+                response = await client.post(
+                    f"/question/{request_id}/reply",
+                    params={"directory": self.workspace_directory},
+                    json={"answers": self._question_answers(message, question_ids)},
+                )
+            response.raise_for_status()
+
+    @staticmethod
+    def _question_answers(message: str, question_ids: list[str]) -> list[list[str]]:
+        try:
+            parsed = json.loads(message)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            return [
+                OpenCodeLLM._answer_values(parsed.get(question_id))
+                for question_id in question_ids
+            ]
+        if isinstance(parsed, list):
+            return [
+                OpenCodeLLM._answer_values(answer)
+                for answer in parsed[: len(question_ids)]
+            ] + [[] for _ in question_ids[len(parsed) :]]
+        return [
+            [message.strip()] if index == 0 and message.strip() else []
+            for index, _ in enumerate(question_ids)
+        ]
+
+    @staticmethod
+    def _answer_values(value: Any) -> list[str]:
+        if isinstance(value, list):
+            return [str(item) for item in value]
+        if value is None or value == "":
+            return []
+        return [str(value)]
+
+    async def _reply_permission(
+        self,
+        request_id: str,
+        decision: str,
+        message: str = "",
+    ) -> None:
+        auth = None
+        if self.server_password:
+            auth = httpx.BasicAuth(
+                self.server_username or "opencode", self.server_password
+            )
+        async with httpx.AsyncClient(
+            base_url=self.base_url,
+            timeout=min(self.timeout, 30),
+            auth=auth,
+        ) as client:
+            response = await client.post(
+                f"/permission/{request_id}/reply",
+                params={"directory": self.workspace_directory},
+                json={"reply": decision, "message": message or None},
+            )
+            response.raise_for_status()
+
+    def _selected_agent(self) -> str:
+        if self.permission_mode == "plan":
+            return "plan"
+        if self.interaction_mode == "coding" and self.agent == "vtuber":
+            return "build"
+        return self.agent
 
     @staticmethod
     def _visible_chunk(chunk: str, output_started: bool) -> tuple[str, bool]:

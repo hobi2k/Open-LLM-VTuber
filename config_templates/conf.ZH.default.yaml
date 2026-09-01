@@ -128,6 +128,7 @@ character_config:
         workspace_directory: '.'
         timeout: 300
         keep_sessions: False # 设为 True 可在 OpenCode 中保留会话
+        permission_mode: 'disabled' # disabled、manual、auto 或 plan
         allow_tools: False # 纯语音角色请保持 False
         show_reasoning: False # 在聊天面板中单独显示推理内容
         server_username: null
@@ -145,6 +146,7 @@ character_config:
         timeout: 300
         show_reasoning: False
         reasoning_effort: 'default'
+        permission_mode: 'disabled' # disabled、manual、auto 或 plan
         interrupt_method: 'user'
 
       codex_cli_llm:
@@ -157,6 +159,7 @@ character_config:
         timeout: 300
         show_reasoning: False
         reasoning_effort: 'default'
+        permission_mode: 'disabled' # disabled、manual、auto 或 plan
         interrupt_method: 'user'
 
       hermes_cli_llm:
@@ -168,6 +171,8 @@ character_config:
         workspace_directory: '.'
         timeout: 300
         show_reasoning: False
+        reasoning_effort: 'default'
+        permission_mode: 'disabled' # disabled、manual、auto 或 plan
         interrupt_method: 'user'
 
       # Claude API 配置

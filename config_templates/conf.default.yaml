@@ -129,6 +129,7 @@ character_config:
         workspace_directory: '.'
         timeout: 300
         keep_sessions: False # Set True to retain sessions in OpenCode
+        permission_mode: 'disabled' # disabled, manual, auto, or plan
         allow_tools: False # Keep False for a voice-only character
         show_reasoning: False # Show reasoning separately in the chat panel
         server_username: null
@@ -146,6 +147,7 @@ character_config:
         timeout: 300
         show_reasoning: False
         reasoning_effort: 'default'
+        permission_mode: 'disabled' # disabled, manual, auto, or plan
         interrupt_method: 'user'
 
       codex_cli_llm:
@@ -158,6 +160,7 @@ character_config:
         timeout: 300
         show_reasoning: False
         reasoning_effort: 'default'
+        permission_mode: 'disabled' # disabled, manual, auto, or plan
         interrupt_method: 'user'
 
       hermes_cli_llm:
@@ -169,6 +172,8 @@ character_config:
         workspace_directory: '.'
         timeout: 300
         show_reasoning: False
+        reasoning_effort: 'default'
+        permission_mode: 'disabled' # disabled, manual, auto, or plan
         interrupt_method: 'user'
 
       # Claude API Configuration

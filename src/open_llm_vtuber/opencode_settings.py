@@ -5,7 +5,7 @@ from typing import Iterable, Literal
 
 import httpx
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .config_manager import validate_config
 from .config_manager.stateless_llm import OpenCodeConfig
@@ -31,7 +31,15 @@ class OpenCodeSettingsUpdate(BaseModel):
     timeout: float = Field(default=300, gt=0)
     keep_sessions: bool = False
     allow_tools: bool = False
+    permission_mode: Literal["disabled", "manual", "auto", "plan"] | None = None
     show_reasoning: bool = False
+
+    @model_validator(mode="after")
+    def resolve_permission_mode(self):
+        if self.permission_mode is None:
+            self.permission_mode = "auto" if self.allow_tools else "disabled"
+        self.allow_tools = self.permission_mode != "disabled"
+        return self
 
 
 def require_loopback_client(host: str | None) -> None:
@@ -65,6 +73,7 @@ def settings_payload(context: ServiceContext) -> dict:
         "timeout": config.timeout,
         "keep_sessions": config.keep_sessions,
         "allow_tools": config.allow_tools,
+        "permission_mode": config.permission_mode,
         "show_reasoning": config.show_reasoning,
         "has_server_password": bool(config.server_password),
     }

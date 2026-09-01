@@ -1,6 +1,6 @@
 # config_manager/llm.py
 from typing import ClassVar, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from .i18n import I18nMixin, Description
 
 
@@ -140,6 +140,9 @@ class OpenCodeConfig(StatelessLLMBaseConfig):
     timeout: float = Field(300, gt=0, alias="timeout")
     keep_sessions: bool = Field(False, alias="keep_sessions")
     allow_tools: bool = Field(False, alias="allow_tools")
+    permission_mode: Literal["disabled", "manual", "auto", "plan"] | None = Field(
+        None, alias="permission_mode"
+    )
     show_reasoning: bool = Field(False, alias="show_reasoning")
     server_username: str | None = Field(None, alias="server_username")
     server_password: str | None = Field(None, alias="server_password")
@@ -181,6 +184,10 @@ class OpenCodeConfig(StatelessLLMBaseConfig):
             en="Allow the selected OpenCode agent to use tools",
             zh="允许所选 OpenCode 智能体使用工具",
         ),
+        "permission_mode": Description(
+            en="Choose disabled, manual approval, automatic approval, or plan mode",
+            zh="选择禁用、手动批准、自动批准或计划模式",
+        ),
         "server_username": Description(
             en="Username for an authenticated OpenCode server",
             zh="启用认证的 OpenCode 服务器用户名",
@@ -195,6 +202,13 @@ class OpenCodeConfig(StatelessLLMBaseConfig):
         **StatelessLLMBaseConfig.DESCRIPTIONS,
         **_OPENCODE_DESCRIPTIONS,
     }
+
+    @model_validator(mode="after")
+    def resolve_permission_mode(self):
+        if self.permission_mode is None:
+            self.permission_mode = "auto" if self.allow_tools else "disabled"
+        self.allow_tools = self.permission_mode != "disabled"
+        return self
 
 
 class CLIAgentConfig(StatelessLLMBaseConfig):
@@ -215,6 +229,16 @@ class CLIAgentConfig(StatelessLLMBaseConfig):
         "default", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"
     ] = Field("default", alias="reasoning_effort")
     allow_tools: bool = Field(False, alias="allow_tools")
+    permission_mode: Literal["disabled", "manual", "auto", "plan"] | None = Field(
+        None, alias="permission_mode"
+    )
+
+    @model_validator(mode="after")
+    def resolve_permission_mode(self):
+        if self.permission_mode is None:
+            self.permission_mode = "auto" if self.allow_tools else "disabled"
+        self.allow_tools = self.permission_mode != "disabled"
+        return self
 
 
 class LmStudioConfig(OpenAICompatibleConfig):

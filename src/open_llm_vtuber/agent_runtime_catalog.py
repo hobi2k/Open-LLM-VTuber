@@ -11,6 +11,7 @@ from .agent_runtime_settings import (
     _cli_config,
     _cli_connection_payload,
 )
+from .agent_runtime_commands import codex_runtime_skills, local_runtime_commands
 from .config_manager.stateless_llm import CLIAgentConfig, OpenCodeConfig
 from .executable_utils import (
     executable_environment,
@@ -34,6 +35,7 @@ async def runtime_catalog_payload(
         claude_status,
         codex_status,
         hermes_status,
+        codex_skills,
     ) = await asyncio.gather(
         _opencode_catalog(opencode),
         _omlx_catalog(),
@@ -42,6 +44,7 @@ async def runtime_catalog_payload(
         _cli_connection_payload(claude_code, "claude_code"),
         _cli_connection_payload(codex, "codex"),
         _cli_connection_payload(hermes, "hermes"),
+        codex_runtime_skills(codex.executable, codex.workspace_directory),
     )
 
     opencode_models = opencode_catalog["models"]
@@ -82,6 +85,20 @@ async def runtime_catalog_payload(
             configured_projects,
         ),
         "sessions": local["sessions"],
+        "commands": {
+            "opencode": _merge_commands(
+                opencode_catalog["commands"],
+                local_runtime_commands("opencode", opencode.workspace_directory),
+            ),
+            "claude_code": local_runtime_commands(
+                "claude_code", claude_code.workspace_directory
+            ),
+            "codex": _merge_commands(
+                codex_skills,
+                local_runtime_commands("codex", codex.workspace_directory),
+            ),
+            "hermes": local_runtime_commands("hermes", hermes.workspace_directory),
+        },
     }
 
 
@@ -112,7 +129,7 @@ def _runtime_configs(
 
 
 async def _opencode_catalog(config: OpenCodeConfig) -> dict:
-    result = {"models": [], "projects": [], "sessions": []}
+    result = {"models": [], "projects": [], "sessions": [], "commands": []}
     auth = None
     if config.server_username and config.server_password:
         auth = (config.server_username, config.server_password)
@@ -122,7 +139,7 @@ async def _opencode_catalog(config: OpenCodeConfig) -> dict:
             auth=auth,
             timeout=min(config.timeout, 3),
         ) as client:
-            provider_response, project_response = await asyncio.gather(
+            provider_response, project_response, command_response = await asyncio.gather(
                 client.get(
                     "/provider",
                     params={"directory": config.workspace_directory},
@@ -131,9 +148,14 @@ async def _opencode_catalog(config: OpenCodeConfig) -> dict:
                     "/project",
                     params={"directory": config.workspace_directory},
                 ),
+                client.get(
+                    "/command",
+                    params={"directory": config.workspace_directory},
+                ),
             )
             provider_response.raise_for_status()
             project_response.raise_for_status()
+            command_response.raise_for_status()
             projects = project_response.json()
             directories = list(
                 dict.fromkeys(
@@ -154,6 +176,18 @@ async def _opencode_catalog(config: OpenCodeConfig) -> dict:
         return result
 
     providers = provider_response.json()
+    result["commands"] = [
+        {
+            "name": str(command["name"]),
+            "description": str(command.get("description") or "OpenCode command"),
+            "source": str(command.get("source") or "command"),
+            "runtime": "opencode",
+            "invocation": f"/{command['name']}",
+            "input_hint": " ".join(command.get("hints") or []),
+        }
+        for command in command_response.json()
+        if isinstance(command, dict) and command.get("name")
+    ]
     connected = set(providers.get("connected", []))
     for provider in providers.get("all", []):
         provider_id = str(provider.get("id", ""))
@@ -510,6 +544,13 @@ def _merge_models(*groups: list[dict]) -> list[dict]:
     for model in (item for group in groups for item in group):
         result[(model.get("provider", ""), model.get("id", ""))] = model
     return list(result.values())
+
+
+def _merge_commands(*groups: list[dict]) -> list[dict]:
+    result = {}
+    for command in (item for group in groups for item in group):
+        result.setdefault(command["name"], command)
+    return sorted(result.values(), key=lambda command: command["name"].lower())
 
 
 def _merge_projects(*groups: list[dict]) -> list[dict]:
