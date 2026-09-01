@@ -20,6 +20,7 @@ from open_llm_vtuber.websocket_handler import WebSocketHandler
 from claude_agent_sdk.types import (
     PermissionResultAllow,
     PermissionResultDeny,
+    ResultMessage,
     ToolPermissionContext,
     ToolResultBlock,
     UserMessage,
@@ -214,6 +215,67 @@ class ClaudePermissionModeTest(unittest.IsolatedAsyncioTestCase):
             workspace_directory=tempfile.gettempdir(),
             permission_mode=mode,
         )
+
+    def test_tool_enabled_modes_do_not_cap_claude_turns(self):
+        self.assertIsNone(self._llm("manual")._max_turns())
+        self.assertIsNone(self._llm("auto")._max_turns())
+        self.assertIsNone(self._llm("plan")._max_turns())
+        self.assertEqual(self._llm("disabled")._max_turns(), 1)
+
+    def test_runtime_error_preserves_claude_detail(self):
+        detail = "You've hit your session limit · resets 7:40pm (Asia/Seoul)"
+
+        self.assertEqual(
+            ClaudeAgentSDKLLM._runtime_error_text(RuntimeError(detail)),
+            f"Claude Code stopped: {detail}",
+        )
+        self.assertEqual(
+            ClaudeAgentSDKLLM._runtime_error_text(RuntimeError()),
+            "Claude Code stopped without an error message.",
+        )
+
+    async def test_sdk_error_is_streamed_with_its_actual_reason(self):
+        detail = "You've hit your session limit · resets 7:40pm (Asia/Seoul)"
+
+        class Client:
+            options = None
+
+            def __init__(self, options):
+                Client.options = options
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def query(self, _prompt):
+                return None
+
+            async def receive_response(self):
+                yield ResultMessage(
+                    subtype="error_during_execution",
+                    duration_ms=1,
+                    duration_api_ms=1,
+                    is_error=True,
+                    num_turns=1,
+                    session_id="claude-session",
+                    errors=[detail],
+                )
+
+        with patch(
+            "open_llm_vtuber.agent.stateless_llm.claude_agent_sdk_llm.ClaudeSDKClient",
+            Client,
+        ):
+            chunks = [
+                chunk
+                async for chunk in self._llm("auto").chat_completion(
+                    [{"role": "user", "content": "continue"}]
+                )
+            ]
+
+        self.assertEqual(chunks, [f"Claude Code stopped: {detail}"])
+        self.assertIsNone(Client.options.max_turns)
 
     async def test_auto_mode_asks_ui_for_user_question_only(self):
         llm = self._llm("auto")

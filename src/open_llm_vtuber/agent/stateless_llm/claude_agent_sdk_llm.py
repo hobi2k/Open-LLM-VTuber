@@ -81,22 +81,22 @@ class ClaudeAgentSDKLLM(CLIAgentLLM):
                         in {"low", "medium", "high", "xhigh", "max"}
                         else None
                     ),
-                    max_turns=50 if self.permission_mode != "disabled" else 1,
+                    max_turns=self._max_turns(),
                 )
                 async with ClaudeSDKClient(options) as client:
                     await client.query(prompt)
                     async for message in client.receive_response():
                         if isinstance(message, ResultMessage):
                             self.session_id = message.session_id or self.session_id
-                            if not text_streamed and message.result:
-                                await output.put(message.result.lstrip())
-                                text_streamed = True
                             if message.is_error:
                                 raise RuntimeError(
                                     "\n".join(message.errors or [])
                                     or message.result
                                     or message.subtype
                                 )
+                            if not text_streamed and message.result:
+                                await output.put(message.result.lstrip())
+                                text_streamed = True
                             continue
 
                         if isinstance(message, StreamEvent):
@@ -169,9 +169,7 @@ class ClaudeAgentSDKLLM(CLIAgentLLM):
                 raise
             except Exception as error:
                 logger.exception("Claude Agent SDK request failed: {}", error)
-                await output.put(
-                    "Could not get a response from Claude Code. Check the runtime settings."
-                )
+                await output.put(self._runtime_error_text(error))
             finally:
                 if reasoning_started:
                     await output.put(
@@ -197,6 +195,18 @@ class ClaudeAgentSDKLLM(CLIAgentLLM):
                 runtime_task,
                 return_exceptions=True,
             )
+
+    def _max_turns(self) -> int | None:
+        if self.permission_mode == "disabled":
+            return 1
+        return None
+
+    @staticmethod
+    def _runtime_error_text(error: Exception) -> str:
+        detail = " ".join(str(error).split()).strip()
+        if not detail:
+            return "Claude Code stopped without an error message."
+        return f"Claude Code stopped: {detail}"
 
     async def _can_use_tool(
         self,
