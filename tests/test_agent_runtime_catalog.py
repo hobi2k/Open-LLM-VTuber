@@ -74,6 +74,64 @@ class AgentRuntimeCatalogTest(unittest.TestCase):
 
         self.assertEqual(models[0]["reasoning_efforts"], ["low", "high"])
 
+    def test_codex_sessions_prefer_custom_name_over_automatic_title(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            path = home / ".codex/state_5.sqlite"
+            path.parent.mkdir()
+            connection = sqlite3.connect(path)
+            connection.execute(
+                "CREATE TABLE threads (id TEXT, title TEXT, name TEXT, "
+                "first_user_message TEXT, cwd TEXT, updated_at INTEGER, "
+                "archived INTEGER)"
+            )
+            connection.execute(
+                "INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, 0)",
+                (
+                    "named-session",
+                    "Initial prompt used as automatic title",
+                    "FANZA development",
+                    "Initial prompt",
+                    "/workspace/fanza",
+                    1,
+                ),
+            )
+            connection.commit()
+            connection.close()
+
+            sessions = _codex_sessions(home)
+
+        self.assertEqual(sessions[0]["title"], "FANZA development")
+
+    def test_claude_sessions_prefer_custom_title_over_first_prompt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            root = home / ".claude/projects/test"
+            root.mkdir(parents=True)
+            session_id = "claude-session"
+            (root / f"{session_id}.jsonl").write_text(
+                json.dumps(
+                    {
+                        "type": "user",
+                        "sessionId": session_id,
+                        "cwd": "/workspace/dlsite",
+                        "message": {"content": "Initial prompt"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            metadata = root / session_id
+            metadata.mkdir()
+            (metadata / "custom-title.json").write_text(
+                json.dumps({"customTitle": "DLsite development"}),
+                encoding="utf-8",
+            )
+
+            sessions = _claude_sessions(home)
+
+        self.assertEqual(sessions[0]["title"], "DLsite development")
+
     def test_local_catalogs_return_more_than_fifty_native_sessions(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
