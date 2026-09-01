@@ -180,25 +180,41 @@ def _rename_codex_local(
     title: str,
     home: Path | None = None,
 ) -> bool:
-    path = (home or Path.home()) / ".codex/state_5.sqlite"
-    if not path.is_file():
-        return False
-    with suppress(sqlite3.Error):
-        connection = sqlite3.connect(path, timeout=3)
-        try:
-            columns = {
-                row[1] for row in connection.execute("PRAGMA table_info(threads)")
-            }
-            field = "name" if "name" in columns else "title"
-            cursor = connection.execute(
-                f"UPDATE threads SET {field} = ? WHERE id = ?",
-                (title, session_id),
-            )
-            connection.commit()
-            return cursor.rowcount > 0
-        finally:
-            connection.close()
-    return False
+    root = (home or Path.home()) / ".codex"
+    renamed = False
+    path = root / "state_5.sqlite"
+    if path.is_file():
+        with suppress(sqlite3.Error):
+            connection = sqlite3.connect(path, timeout=3)
+            try:
+                columns = {
+                    row[1]
+                    for row in connection.execute("PRAGMA table_info(threads)")
+                }
+                field = "name" if "name" in columns else "title"
+                cursor = connection.execute(
+                    f"UPDATE threads SET {field} = ? WHERE id = ?",
+                    (title, session_id),
+                )
+                connection.commit()
+                renamed = cursor.rowcount > 0
+            finally:
+                connection.close()
+
+    for catalog_path in (root / "sqlite").glob("codex*.db"):
+        with suppress(sqlite3.Error):
+            connection = sqlite3.connect(catalog_path, timeout=3)
+            try:
+                cursor = connection.execute(
+                    "UPDATE local_thread_catalog SET display_title = ?, "
+                    "pending_observed_title = 0 WHERE thread_id = ?",
+                    (title, session_id),
+                )
+                connection.commit()
+                renamed = cursor.rowcount > 0 or renamed
+            finally:
+                connection.close()
+    return renamed
 
 
 def _rename_claude_local(

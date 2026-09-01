@@ -429,14 +429,54 @@ def _hermes_models() -> list[dict]:
 
 
 def _codex_sessions(home: Path | None = None) -> list[dict]:
-    path = (home or Path.home()) / ".codex/state_5.sqlite"
-    return _sqlite_sessions(
-        path,
-        "SELECT id, COALESCE(NULLIF(name, ''), NULLIF(title, ''), "
-        "NULLIF(first_user_message, ''), 'Untitled conversation'), cwd, "
-        "updated_at, 'codex' FROM threads WHERE archived = 0 "
-        "ORDER BY updated_at DESC",
-    )
+    root = (home or Path.home()) / ".codex"
+    path = root / "state_5.sqlite"
+    if not path.is_file():
+        return []
+    catalog_titles = _codex_catalog_titles(root)
+    with suppress(sqlite3.Error):
+        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            return [
+                {
+                    "id": row[0],
+                    "title": _session_title(
+                        row[1]
+                        or catalog_titles.get(row[0])
+                        or row[2]
+                        or row[3]
+                    ),
+                    "workspace": row[4],
+                    "updated_at": row[5],
+                    "source": "codex",
+                }
+                for row in connection.execute(
+                    "SELECT id, NULLIF(name, ''), NULLIF(title, ''), "
+                    "NULLIF(first_user_message, ''), cwd, updated_at "
+                    "FROM threads WHERE archived = 0 ORDER BY updated_at DESC"
+                ).fetchall()
+            ]
+        finally:
+            connection.close()
+    return []
+
+
+def _codex_catalog_titles(root: Path) -> dict[str, str]:
+    titles = {}
+    for path in (root / "sqlite").glob("codex*.db"):
+        with suppress(sqlite3.Error):
+            connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+            try:
+                rows = connection.execute(
+                    "SELECT thread_id, display_title FROM local_thread_catalog "
+                    "WHERE missing_candidate = 0 AND NULLIF(display_title, '') "
+                    "IS NOT NULL ORDER BY source_updated_at DESC"
+                ).fetchall()
+            finally:
+                connection.close()
+            for session_id, title in rows:
+                titles.setdefault(str(session_id), str(title))
+    return titles
 
 
 def _hermes_sessions(home: Path | None = None) -> list[dict]:

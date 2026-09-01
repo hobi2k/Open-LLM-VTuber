@@ -83,6 +83,20 @@ class AgentRuntimeSessionRenameTest(unittest.TestCase):
             )
             connection.commit()
             connection.close()
+            catalog = home / ".codex/sqlite/codex-dev.db"
+            catalog.parent.mkdir()
+            connection = sqlite3.connect(catalog)
+            connection.execute(
+                "CREATE TABLE local_thread_catalog (thread_id TEXT, "
+                "display_title TEXT, source_updated_at REAL, "
+                "missing_candidate INTEGER, pending_observed_title INTEGER)"
+            )
+            connection.execute(
+                "INSERT INTO local_thread_catalog VALUES (?, ?, ?, 0, 1)",
+                ("codex-session", "Generated Codex title", 1),
+            )
+            connection.commit()
+            connection.close()
 
             self.assertTrue(
                 _rename_codex_local(
@@ -92,8 +106,16 @@ class AgentRuntimeSessionRenameTest(unittest.TestCase):
                 )
             )
             sessions = _codex_sessions(home)
+            connection = sqlite3.connect(catalog)
+            catalog_row = connection.execute(
+                "SELECT display_title, pending_observed_title "
+                "FROM local_thread_catalog WHERE thread_id = ?",
+                ("codex-session",),
+            ).fetchone()
+            connection.close()
 
         self.assertEqual(sessions[0]["title"], "New Codex title")
+        self.assertEqual(catalog_row, ("New Codex title", 0))
 
     def test_claude_rename_writes_native_custom_title(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -108,6 +108,48 @@ class AgentRuntimeCatalogTest(unittest.TestCase):
 
         self.assertEqual(sessions[0]["title"], "FANZA development")
 
+    def test_codex_sessions_use_desktop_catalog_title_before_initial_prompt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            path = home / ".codex/state_5.sqlite"
+            path.parent.mkdir()
+            connection = sqlite3.connect(path)
+            connection.execute(
+                "CREATE TABLE threads (id TEXT, title TEXT, name TEXT, "
+                "first_user_message TEXT, cwd TEXT, updated_at INTEGER, "
+                "archived INTEGER)"
+            )
+            connection.execute(
+                "INSERT INTO threads VALUES (?, ?, '', ?, ?, ?, 0)",
+                (
+                    "catalog-session",
+                    "A very long initial prompt used as the legacy title",
+                    "A very long initial prompt",
+                    "/workspace/fanza",
+                    1,
+                ),
+            )
+            connection.commit()
+            connection.close()
+            catalog = home / ".codex/sqlite/codex-dev.db"
+            catalog.parent.mkdir()
+            connection = sqlite3.connect(catalog)
+            connection.execute(
+                "CREATE TABLE local_thread_catalog (thread_id TEXT, "
+                "display_title TEXT, source_updated_at REAL, "
+                "missing_candidate INTEGER)"
+            )
+            connection.execute(
+                "INSERT INTO local_thread_catalog VALUES (?, ?, ?, 0)",
+                ("catalog-session", "Toptoon FANZA development", 1),
+            )
+            connection.commit()
+            connection.close()
+
+            sessions = _codex_sessions(home)
+
+        self.assertEqual(sessions[0]["title"], "Toptoon FANZA development")
+
     def test_claude_sessions_prefer_custom_title_over_first_prompt(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
