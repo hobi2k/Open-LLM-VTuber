@@ -33,6 +33,10 @@ from .agent_runtime_settings import (
     runtime_settings_payload,
 )
 from .agent_runtime_catalog import runtime_catalog_payload
+from .agent_runtime_sessions import (
+    SessionRenameRequest,
+    rename_runtime_session,
+)
 from .audio_settings import (
     TTSSettingsUpdate,
     apply_tts_settings,
@@ -126,6 +130,19 @@ def init_client_ws_route(default_context_cache: ServiceContext) -> APIRouter:
     ):
         require_local_request(request)
         return await runtime_catalog_payload(default_context_cache, settings)
+
+    @router.patch("/api/agent-runtime/session-title")
+    async def rename_agent_runtime_session(
+        request: Request,
+        rename: SessionRenameRequest,
+    ):
+        require_local_request(request)
+        try:
+            return await rename_runtime_session(default_context_cache, rename)
+        except FileNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except RuntimeError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
 
     @router.get("/api/audio/settings")
     async def get_audio_settings(request: Request):
