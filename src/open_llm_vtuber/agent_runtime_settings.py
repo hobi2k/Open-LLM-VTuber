@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Iterable, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .config_manager import validate_config
 from .config_manager.stateless_llm import CLIAgentConfig, OpenCodeConfig
@@ -42,6 +42,14 @@ class CLISettingsUpdate(BaseModel):
         "default", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"
     ] = "default"
     allow_tools: bool = False
+    permission_mode: Literal["disabled", "manual", "auto", "plan"] | None = None
+
+    @model_validator(mode="after")
+    def resolve_permission_mode(self):
+        if self.permission_mode is None:
+            self.permission_mode = "auto" if self.allow_tools else "disabled"
+        self.allow_tools = self.permission_mode != "disabled"
+        return self
 
 
 class AgentRuntimeSettingsUpdate(BaseModel):
@@ -129,6 +137,7 @@ def _cli_payload(config: CLIAgentConfig) -> dict:
         "show_reasoning": config.show_reasoning,
         "reasoning_effort": config.reasoning_effort,
         "allow_tools": config.allow_tools,
+        "permission_mode": config.permission_mode,
     }
 
 
@@ -186,6 +195,7 @@ async def runtime_settings_payload(context: ServiceContext) -> dict:
             "timeout": opencode.timeout,
             "keep_sessions": opencode.keep_sessions,
             "allow_tools": opencode.allow_tools,
+            "permission_mode": opencode.permission_mode,
             "show_reasoning": opencode.show_reasoning,
             "has_server_password": bool(opencode.server_password),
             "connection": _unchecked_opencode_connection(),

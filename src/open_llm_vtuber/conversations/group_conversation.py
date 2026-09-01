@@ -360,6 +360,7 @@ async def process_member_response(
                 "reasoning-delta",
                 "reasoning-end",
                 "agent-activity",
+                "permission-request",
             }:
                 if broadcast_func and group_members:
                     logger.debug(f"Broadcasting agent status update: {output_item}")

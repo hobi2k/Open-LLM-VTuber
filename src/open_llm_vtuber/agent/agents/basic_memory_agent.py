@@ -654,6 +654,7 @@ class BasicMemoryAgent(AgentInterface):
                         "reasoning-delta",
                         "reasoning-end",
                         "agent-activity",
+                        "permission-request",
                     }:
                         yield event
                         continue

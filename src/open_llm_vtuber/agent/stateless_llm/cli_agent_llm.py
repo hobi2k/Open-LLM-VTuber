@@ -12,6 +12,11 @@ from loguru import logger
 
 from ...executable_utils import executable_environment, resolve_executable
 from .agent_activity import activity_signature, tool_activity
+from .permission_bridge import (
+    PermissionBridge,
+    PermissionMode,
+    permission_mode_from_legacy,
+)
 from .stateless_llm_interface import StatelessLLMInterface
 
 
@@ -35,6 +40,7 @@ class CLIAgentLLM(StatelessLLMInterface):
         show_reasoning: bool = False,
         reasoning_effort: str = "default",
         allow_tools: bool = False,
+        permission_mode: PermissionMode | None = None,
     ):
         self.runtime = runtime
         self.executable = self._resolve_executable(executable)
@@ -47,9 +53,21 @@ class CLIAgentLLM(StatelessLLMInterface):
         self.timeout = timeout
         self.show_reasoning = show_reasoning
         self.reasoning_effort = reasoning_effort
-        self.allow_tools = allow_tools
+        self.permission_mode = permission_mode_from_legacy(
+            permission_mode, allow_tools
+        )
+        self.allow_tools = self.permission_mode != "disabled"
         self.support_tools = False
         self._activity_inputs: Dict[str, tuple[str, dict]] = {}
+        self._permission_bridge = PermissionBridge(runtime, self.permission_mode)
+
+    async def respond_to_permission(
+        self,
+        request_id: str,
+        decision: str,
+        message: str = "",
+    ) -> bool:
+        return await self._permission_bridge.respond(request_id, decision, message)
 
     async def chat_completion(
         self,
@@ -59,6 +77,10 @@ class CLIAgentLLM(StatelessLLMInterface):
     ) -> AsyncIterator[Union[str, Dict[str, Any]]]:
         if tools:
             logger.warning("{} does not forward VTuber tools", self.runtime)
+
+        if error := self._configuration_error():
+            yield error
+            return
 
         prompt = (
             self._latest_user_text(messages)
@@ -210,12 +232,16 @@ class CLIAgentLLM(StatelessLLMInterface):
                 "--output-format",
                 "stream-json" if stream_output else "json",
             ]
-            if self.allow_tools:
-                command.extend(
-                    ["--tools", "default", "--permission-mode", "acceptEdits"]
-                )
-            else:
+            if self.permission_mode == "disabled":
                 command.extend(["--tools", "", "--permission-mode", "dontAsk"])
+            elif self.permission_mode == "manual":
+                command.extend(["--tools", "default", "--permission-mode", "default"])
+            elif self.permission_mode == "plan":
+                command.extend(["--tools", "default", "--permission-mode", "plan"])
+            else:
+                command.extend(
+                    ["--tools", "default", "--permission-mode", "bypassPermissions"]
+                )
             if stream_output:
                 command.append("--verbose")
             if self.show_reasoning:
@@ -241,7 +267,7 @@ class CLIAgentLLM(StatelessLLMInterface):
                     "--skip-git-repo-check",
                     "-c",
                     'sandbox_mode="workspace-write"'
-                    if self.allow_tools
+                    if self.permission_mode == "auto"
                     else 'sandbox_mode="read-only"',
                 ]
                 if self.interaction_mode != "coding":
@@ -254,7 +280,11 @@ class CLIAgentLLM(StatelessLLMInterface):
                     "--color",
                     "never",
                     "--sandbox",
-                    "workspace-write" if self.allow_tools else "read-only",
+                    (
+                        "workspace-write"
+                        if self.permission_mode == "auto"
+                        else "read-only"
+                    ),
                     "--skip-git-repo-check",
                 ]
                 if self.interaction_mode != "coding":
@@ -265,6 +295,14 @@ class CLIAgentLLM(StatelessLLMInterface):
                 command.extend(
                     ["-c", f'model_reasoning_effort="{self.reasoning_effort}"']
                 )
+            command.extend(
+                [
+                    "-c",
+                    'approval_policy="never"'
+                    if self.permission_mode == "auto"
+                    else 'approval_policy="untrusted"',
+                ]
+            )
             if self.session_id:
                 command.append(self.session_id)
             command.append("-")
@@ -280,7 +318,9 @@ class CLIAgentLLM(StatelessLLMInterface):
                 "--source",
                 "cli" if self.interaction_mode == "coding" else "tool",
             ]
-            if self.allow_tools:
+            if self.permission_mode == "auto":
+                command.extend(["--yolo", "--max-turns", "50"])
+            elif self.permission_mode in {"manual", "plan"}:
                 command.extend(["--max-turns", "50"])
             else:
                 if self.interaction_mode != "coding":
@@ -808,6 +848,25 @@ class CLIAgentLLM(StatelessLLMInterface):
             "hermes": "hermes",
         }.get(self.runtime, self.runtime)
         return resolve_executable(executable, command) or command
+
+    def _configuration_error(self) -> str | None:
+        if not Path(self.workspace_directory).is_dir():
+            return (
+                f"{self._display_name()} workspace was not found: "
+                f"{self.workspace_directory}. Choose an existing project folder in "
+                "AI Runtime settings."
+            )
+        command = {
+            "claude_code": "claude",
+            "codex": "codex",
+            "hermes": "hermes",
+        }.get(self.runtime, self.runtime)
+        if resolve_executable(self.executable, command):
+            return None
+        return (
+            f"{self._display_name()} executable was not found: {self.executable}. "
+            "Run Find runtimes or enter the executable path in AI Runtime settings."
+        )
 
     @staticmethod
     def _content_text(content: Any) -> str:

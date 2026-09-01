@@ -94,6 +94,7 @@ class WebSocketHandler:
             "fetch-backgrounds": self._handle_fetch_backgrounds,
             "audio-play-start": self._handle_audio_play_start,
             "request-init-config": self._handle_init_config_request,
+            "permission-response": self._handle_permission_response,
             "heartbeat": self._handle_heartbeat,
         }
 
@@ -206,12 +207,16 @@ class WebSocketHandler:
             asr_engine=self.default_context_cache.asr_engine,
             tts_engine=self.default_context_cache.tts_engine,
             vad_engine=self.default_context_cache.vad_engine,
-            agent_engine=self.default_context_cache.agent_engine,
+            agent_engine=None,
             translate_engine=self.default_context_cache.translate_engine,
             mcp_server_registery=self.default_context_cache.mcp_server_registery,
             tool_adapter=self.default_context_cache.tool_adapter,
             send_text=send_text,
             client_uid=client_uid,
+        )
+        await session_service_context.init_agent(
+            session_service_context.character_config.agent_config,
+            session_service_context.character_config.persona_prompt,
         )
         return session_service_context
 
@@ -293,6 +298,7 @@ class WebSocketHandler:
 
     async def handle_disconnect(self, client_uid: str) -> None:
         """Handle client disconnection"""
+        context = self.client_contexts.get(client_uid)
         group = self.chat_group_manager.get_client_group(client_uid)
         if group:
             await handle_group_interrupt(
@@ -322,12 +328,39 @@ class WebSocketHandler:
             self.current_conversation_tasks.pop(client_uid, None)
 
         # Call context close to clean up resources (e.g., MCPClient)
-        context = self.client_contexts.get(client_uid)
         if context:
             await context.close()
 
         logger.info(f"Client {client_uid} disconnected")
         message_handler.cleanup_client(client_uid)
+
+    async def _handle_permission_response(
+        self, websocket: WebSocket, client_uid: str, data: dict
+    ) -> None:
+        context = self.client_contexts.get(client_uid)
+        llm = getattr(getattr(context, "agent_engine", None), "_llm", None)
+        respond = getattr(llm, "respond_to_permission", None)
+        request_id = data.get("request_id")
+        decision = data.get("decision")
+        success = False
+        if (
+            callable(respond)
+            and isinstance(request_id, str)
+            and decision in {"once", "always", "reject"}
+        ):
+            success = await respond(
+                request_id,
+                decision,
+                str(data.get("message") or ""),
+            )
+        await websocket.send_json(
+            {
+                "type": "permission-resolved",
+                "request_id": request_id,
+                "decision": decision,
+                "success": success,
+            }
+        )
 
     async def _cleanup_failed_connection(self, client_uid: str) -> None:
         """Clean up failed connection data"""

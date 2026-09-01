@@ -1,7 +1,9 @@
 import json
+import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import urlparse
 
 from open_llm_vtuber.agent.stateless_llm.opencode_llm import OpenCodeLLM
@@ -14,6 +16,8 @@ class OpenCodeHandler(BaseHTTPRequestHandler):
     requests = []
     use_deltas = True
     assistant_error = None
+    questions = None
+    question_answered = threading.Event()
 
     def do_POST(self):
         body = self._body()
@@ -28,7 +32,18 @@ class OpenCodeHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
+        if urlparse(self.path).path.endswith("/command"):
+            self.prompt_started.set()
+            self._json(200, {"info": {"id": "msg_command"}, "parts": []})
+            return
         if urlparse(self.path).path.endswith("/abort"):
+            self._json(200, True)
+            return
+        if urlparse(self.path).path in {
+            "/question/que_test/reply",
+            "/question/que_test/reject",
+        }:
+            self.question_answered.set()
             self._json(200, True)
             return
         self._json(404, {"error": "not found"})
@@ -61,6 +76,16 @@ class OpenCodeHandler(BaseHTTPRequestHandler):
                 self._event("session.idle", {"sessionID": "ses_test"})
                 self.close_connection = True
                 return
+            if self.questions:
+                self._event(
+                    "question.asked",
+                    {
+                        "id": "que_test",
+                        "sessionID": "ses_test",
+                        "questions": self.questions,
+                    },
+                )
+                self.question_answered.wait(timeout=2)
             self._event(
                 "message.part.updated",
                 {
@@ -183,6 +208,14 @@ class OpenCodeHandler(BaseHTTPRequestHandler):
             return
         self._json(404, {"error": "not found"})
 
+    def do_PATCH(self):
+        body = self._body()
+        self.requests.append(("PATCH", urlparse(self.path).path, body))
+        if urlparse(self.path).path == "/session/ses_test":
+            self._json(200, {"id": "ses_test", **(body or {})})
+            return
+        self._json(404, {"error": "not found"})
+
     def do_DELETE(self):
         self.requests.append(("DELETE", urlparse(self.path).path, None))
         self._json(200, True)
@@ -216,6 +249,8 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
         OpenCodeHandler.requests = []
         OpenCodeHandler.use_deltas = True
         OpenCodeHandler.assistant_error = None
+        OpenCodeHandler.questions = None
+        OpenCodeHandler.question_answered = threading.Event()
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), OpenCodeHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -274,6 +309,43 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
             ("DELETE", "/session/ses_test", None), OpenCodeHandler.requests
         )
 
+    async def test_slash_command_uses_native_opencode_command_endpoint(self):
+        llm = self._llm()
+
+        chunks = [
+            chunk
+            async for chunk in llm.chat_completion(
+                [{"role": "user", "content": "/review staged changes"}]
+            )
+        ]
+
+        self.assertEqual("".join(chunks), "안녕하세요")
+        request = next(
+            body
+            for method, path, body in OpenCodeHandler.requests
+            if method == "POST" and path.endswith("/command")
+        )
+        self.assertEqual(request["command"], "review")
+        self.assertEqual(request["arguments"], "staged changes")
+
+    def test_local_opencode_skill_expands_before_prompt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            skill = workspace / ".opencode/skills/release/SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text(
+                "---\nname: release\n---\nPrepare $ARGUMENTS",
+                encoding="utf-8",
+            )
+            messages, slash_command = self._llm(
+                workspace_directory=str(workspace)
+            )._prepare_slash_command(
+                [{"role": "user", "content": "/release frontend"}]
+            )
+
+        self.assertIsNone(slash_command)
+        self.assertIn("Prepare frontend", messages[0]["content"])
+
     async def test_reuses_session_and_sends_only_latest_user_message(self):
         llm = self._llm()
         for _ in range(2):
@@ -302,6 +374,21 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertIn("[ASSISTANT]", prompt_posts[0]["parts"][0]["text"])
         self.assertEqual(prompt_posts[1]["parts"][0]["text"], "Latest question")
+        permission_updates = [
+            body
+            for method, path, body in OpenCodeHandler.requests
+            if method == "PATCH" and path == "/session/ses_test"
+        ]
+        self.assertEqual(
+            permission_updates,
+            [
+                {
+                    "permission": [
+                        {"permission": "*", "pattern": "*", "action": "deny"}
+                    ]
+                }
+            ],
+        )
 
     async def test_uses_final_text_when_provider_sends_no_deltas(self):
         OpenCodeHandler.use_deltas = False
@@ -332,7 +419,7 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
             "안녕하세요",
         )
 
-    async def test_allow_tools_omits_session_permission_override(self):
+    async def test_allow_tools_explicitly_auto_approves_session_tools(self):
         llm = self._llm(allow_tools=True)
         _ = [
             chunk
@@ -345,7 +432,10 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
             for method, path, body in OpenCodeHandler.requests
             if method == "POST" and path == "/session"
         )
-        self.assertNotIn("permission", session_request)
+        self.assertEqual(
+            session_request["permission"],
+            [{"permission": "*", "pattern": "*", "action": "allow"}],
+        )
 
     async def test_coding_mode_uses_build_agent_without_character_prompt(self):
         llm = self._llm(interaction_mode="coding", allow_tools=True)
@@ -366,7 +456,10 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
             if method == "POST" and path == "/session"
         )
         self.assertEqual(session_request["agent"], "build")
-        self.assertNotIn("permission", session_request)
+        self.assertEqual(
+            session_request["permission"],
+            [{"permission": "*", "pattern": "*", "action": "allow"}],
+        )
         prompt_request = next(
             body
             for method, path, body in OpenCodeHandler.requests
@@ -393,6 +486,94 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             session_request["permission"],
             [{"permission": "*", "pattern": "*", "action": "deny"}],
+        )
+
+    async def test_manual_mode_asks_before_every_tool(self):
+        llm = self._llm(interaction_mode="coding", permission_mode="manual")
+        _ = [
+            chunk
+            async for chunk in llm.chat_completion(
+                [{"role": "user", "content": "Review this project"}]
+            )
+        ]
+        session_request = next(
+            body
+            for method, path, body in OpenCodeHandler.requests
+            if method == "POST" and path == "/session"
+        )
+        self.assertEqual(
+            session_request["permission"],
+            [{"permission": "*", "pattern": "*", "action": "ask"}],
+        )
+
+    async def test_question_request_waits_for_ui_and_replies_in_native_format(self):
+        OpenCodeHandler.questions = [
+            {
+                "header": "Scope",
+                "question": "Which scope should be changed?",
+                "options": [{"label": "Workspace"}, {"label": "Global"}],
+                "multiple": False,
+                "custom": True,
+            },
+            {
+                "header": "Checks",
+                "question": "Which checks should run?",
+                "options": [{"label": "Tests"}, {"label": "Lint"}],
+                "multiple": True,
+                "custom": True,
+            },
+        ]
+        llm = self._llm(interaction_mode="coding", permission_mode="manual")
+        stream = llm.chat_completion(
+            [{"role": "user", "content": "Ask before choosing scope"}]
+        )
+
+        question = await anext(stream)
+        self.assertEqual(question["type"], "permission-request")
+        self.assertEqual(question["tool_name"], "user_input")
+        self.assertEqual(
+            [item["id"] for item in question["input"]["questions"]],
+            ["0", "1"],
+        )
+        self.assertTrue(
+            await llm.respond_to_permission(
+                "que_test",
+                "once",
+                json.dumps({"0": ["Workspace"], "1": ["Tests", "Lint"]}),
+            )
+        )
+        remaining = [item async for item in stream]
+
+        self.assertEqual(
+            "".join(item for item in remaining if isinstance(item, str)),
+            "안녕하세요",
+        )
+        reply = next(
+            body
+            for method, path, body in OpenCodeHandler.requests
+            if method == "POST" and path == "/question/que_test/reply"
+        )
+        self.assertEqual(reply["answers"], [["Workspace"], ["Tests", "Lint"]])
+
+    async def test_plan_mode_uses_plan_agent_and_read_only_tools(self):
+        llm = self._llm(interaction_mode="coding", permission_mode="plan")
+        _ = [
+            chunk
+            async for chunk in llm.chat_completion(
+                [{"role": "user", "content": "Review this project"}]
+            )
+        ]
+        session_request = next(
+            body
+            for method, path, body in OpenCodeHandler.requests
+            if method == "POST" and path == "/session"
+        )
+        self.assertEqual(session_request["agent"], "plan")
+        permission = session_request["permission"]
+        self.assertEqual(permission[0]["action"], "deny")
+        self.assertEqual(
+            {rule["permission"] for rule in permission[1:]},
+            {"read", "glob", "grep", "list", "lsp"},
         )
 
     async def test_coding_mode_streams_command_and_file_activity(self):
@@ -450,17 +631,20 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
     def _llm(
         self,
         allow_tools=False,
+        permission_mode=None,
         show_reasoning=False,
         interaction_mode="character",
+        workspace_directory=".",
     ):
         return OpenCodeLLM(
             base_url=f"http://127.0.0.1:{self.server.server_port}",
             provider_id="omlx",
             model="local-model",
             agent="vtuber",
-            workspace_directory=".",
+            workspace_directory=workspace_directory,
             timeout=5,
             allow_tools=allow_tools,
+            permission_mode=permission_mode,
             show_reasoning=show_reasoning,
             interaction_mode=interaction_mode,
         )

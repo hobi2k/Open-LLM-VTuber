@@ -178,7 +178,8 @@ class CLIAgentLLMTest(unittest.IsolatedAsyncioTestCase):
         arguments = json.loads(self.arguments.read_text(encoding="utf-8"))
         self.assertEqual(arguments[arguments.index("--tools") + 1], "default")
         self.assertEqual(
-            arguments[arguments.index("--permission-mode") + 1], "acceptEdits"
+            arguments[arguments.index("--permission-mode") + 1],
+            "bypassPermissions",
         )
         self.assertEqual(self.stdin.read_text(encoding="utf-8"), "Hello")
 

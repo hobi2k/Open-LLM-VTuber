@@ -96,6 +96,7 @@ async def process_single_conversation(
                     "reasoning-delta",
                     "reasoning-end",
                     "agent-activity",
+                    "permission-request",
                 }:
                     output_item["name"] = context.character_config.character_name
                     logger.debug(f"Sending agent status update: {output_item}")
