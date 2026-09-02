@@ -33,6 +33,7 @@ class CLISettingsUpdate(BaseModel):
     launch_mode: Literal["direct", "omlx"] = "direct"
     interaction_mode: Literal["character", "coding"] = "character"
     session_id: str = ""
+    new_session_title: str = Field(default="", max_length=120)
     model: str = ""
     provider: str = ""
     workspace_directory: str = Field(default=".", min_length=1)
@@ -130,6 +131,7 @@ def _cli_payload(config: CLIAgentConfig) -> dict:
         "launch_mode": config.launch_mode,
         "interaction_mode": config.interaction_mode,
         "session_id": config.session_id,
+        "new_session_title": config.new_session_title,
         "model": config.model,
         "provider": config.provider,
         "workspace_directory": config.workspace_directory,
@@ -171,6 +173,12 @@ def _active_session_id(context: ServiceContext) -> str:
     return session_id if isinstance(session_id, str) else ""
 
 
+def _active_new_session_title(context: ServiceContext) -> str:
+    llm = getattr(context.agent_engine, "_llm", None)
+    title = getattr(llm, "new_session_title", "")
+    return title if isinstance(title, str) else ""
+
+
 async def runtime_settings_payload(context: ServiceContext) -> dict:
     opencode = get_opencode_config(context)
     claude_code = _cli_config(context, "claude_code_llm")
@@ -178,6 +186,7 @@ async def runtime_settings_payload(context: ServiceContext) -> dict:
     hermes = _cli_config(context, "hermes_cli_llm")
     active = context.character_config.agent_config.agent_settings.basic_memory_agent.llm_provider
     active_session_id = _active_session_id(context)
+    active_new_session_title = _active_new_session_title(context)
     return {
         "provider": active,
         "opencode": {
@@ -190,6 +199,11 @@ async def runtime_settings_payload(context: ServiceContext) -> dict:
             "launch_mode": opencode.launch_mode,
             "session_id": (
                 active_session_id if active == "opencode_llm" else opencode.session_id
+            ),
+            "new_session_title": (
+                active_new_session_title
+                if active == "opencode_llm"
+                else opencode.new_session_title
             ),
             "workspace_directory": opencode.workspace_directory,
             "timeout": opencode.timeout,
@@ -207,6 +221,11 @@ async def runtime_settings_payload(context: ServiceContext) -> dict:
                 if active == "claude_code_llm"
                 else claude_code.session_id
             ),
+            "new_session_title": (
+                active_new_session_title
+                if active == "claude_code_llm"
+                else claude_code.new_session_title
+            ),
             "connection": _unchecked_cli_connection(),
         },
         "codex": {
@@ -214,12 +233,22 @@ async def runtime_settings_payload(context: ServiceContext) -> dict:
             "session_id": (
                 active_session_id if active == "codex_cli_llm" else codex.session_id
             ),
+            "new_session_title": (
+                active_new_session_title
+                if active == "codex_cli_llm"
+                else codex.new_session_title
+            ),
             "connection": _unchecked_cli_connection(),
         },
         "hermes": {
             **_cli_payload(hermes),
             "session_id": (
                 active_session_id if active == "hermes_cli_llm" else hermes.session_id
+            ),
+            "new_session_title": (
+                active_new_session_title
+                if active == "hermes_cli_llm"
+                else hermes.new_session_title
             ),
             "connection": _unchecked_cli_connection(),
         },

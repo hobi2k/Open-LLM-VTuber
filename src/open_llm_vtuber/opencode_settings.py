@@ -27,6 +27,7 @@ class OpenCodeSettingsUpdate(BaseModel):
     interaction_mode: Literal["character", "coding"] = "character"
     launch_mode: Literal["direct", "omlx"] = "direct"
     session_id: str = ""
+    new_session_title: str = Field(default="", max_length=120)
     workspace_directory: str = Field(default=".", min_length=1)
     timeout: float = Field(default=300, gt=0)
     keep_sessions: bool = False
@@ -69,6 +70,7 @@ def settings_payload(context: ServiceContext) -> dict:
         "interaction_mode": config.interaction_mode,
         "launch_mode": config.launch_mode,
         "session_id": config.session_id,
+        "new_session_title": config.new_session_title,
         "workspace_directory": config.workspace_directory,
         "timeout": config.timeout,
         "keep_sessions": config.keep_sessions,

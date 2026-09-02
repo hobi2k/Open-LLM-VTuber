@@ -35,6 +35,7 @@ class OpenCodeLLM(StatelessLLMInterface):
         agent: str = "vtuber",
         interaction_mode: str = "character",
         session_id: str = "",
+        new_session_title: str = "",
         workspace_directory: str = ".",
         timeout: float = 300,
         keep_sessions: bool = False,
@@ -50,6 +51,7 @@ class OpenCodeLLM(StatelessLLMInterface):
         self.agent = agent
         self.interaction_mode = interaction_mode
         self.session_id = session_id
+        self.new_session_title = " ".join(new_session_title.split())
         self.workspace_directory = str(Path(workspace_directory).expanduser().resolve())
         self.timeout = timeout
         self.keep_sessions = keep_sessions
@@ -108,6 +110,7 @@ class OpenCodeLLM(StatelessLLMInterface):
                 if not session_id:
                     session_id = await self._create_session(client)
                     self.session_id = session_id
+                    self.new_session_title = ""
                 else:
                     await self._configure_session(client, session_id)
                 prompt_messages, slash_command = self._prepare_slash_command(messages)
@@ -185,9 +188,12 @@ class OpenCodeLLM(StatelessLLMInterface):
     async def _create_session(self, client: httpx.AsyncClient) -> str:
         payload: Dict[str, Any] = {
             "title": (
-                "Open-LLM coding session"
-                if self.interaction_mode == "coding"
-                else "Open-LLM-VTuber conversation"
+                self.new_session_title
+                or (
+                    "Open-LLM coding session"
+                    if self.interaction_mode == "coding"
+                    else "Open-LLM-VTuber conversation"
+                )
             ),
             "agent": self._selected_agent(),
             "model": {"providerID": self.provider_id, "id": self.model},

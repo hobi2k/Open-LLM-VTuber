@@ -98,6 +98,7 @@ class OpenCodeSettingsTest(unittest.TestCase):
             cli = CLISettingsUpdate(
                 executable="/tmp/fake-cli",
                 model="test-model",
+                new_session_title="Release work",
                 workspace_directory="/tmp",
                 timeout=45,
                 interaction_mode="coding",
@@ -136,6 +137,10 @@ class OpenCodeSettingsTest(unittest.TestCase):
             self.assertEqual(
                 agent_config["llm_configs"]["codex_cli_llm"]["executable"],
                 "/tmp/fake-codex",
+            )
+            self.assertEqual(
+                agent_config["llm_configs"]["hermes_cli_llm"]["new_session_title"],
+                "Release work",
             )
             self.assertEqual(
                 agent_config["llm_configs"]["hermes_cli_llm"]["provider"],

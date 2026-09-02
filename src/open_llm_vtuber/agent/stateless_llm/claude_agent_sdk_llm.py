@@ -92,6 +92,7 @@ class ClaudeAgentSDKLLM(CLIAgentLLM):
                     async for message in client.receive_response():
                         if isinstance(message, ResultMessage):
                             self.session_id = message.session_id or self.session_id
+                            await self._apply_new_session_title()
                             if message.is_error:
                                 raise RuntimeError(
                                     "\n".join(message.errors or [])

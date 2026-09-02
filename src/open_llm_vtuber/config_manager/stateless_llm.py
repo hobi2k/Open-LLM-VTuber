@@ -136,6 +136,7 @@ class OpenCodeConfig(StatelessLLMBaseConfig):
     )
     launch_mode: Literal["direct", "omlx"] = Field("direct", alias="launch_mode")
     session_id: str = Field("", alias="session_id")
+    new_session_title: str = Field("", max_length=120, alias="new_session_title")
     workspace_directory: str = Field(".", alias="workspace_directory")
     timeout: float = Field(300, gt=0, alias="timeout")
     keep_sessions: bool = Field(False, alias="keep_sessions")
@@ -220,6 +221,7 @@ class CLIAgentConfig(StatelessLLMBaseConfig):
         "character", alias="interaction_mode"
     )
     session_id: str = Field("", alias="session_id")
+    new_session_title: str = Field("", max_length=120, alias="new_session_title")
     model: str = Field("", alias="model")
     provider: str = Field("", alias="provider")
     workspace_directory: str = Field(".", min_length=1, alias="workspace_directory")

@@ -35,6 +35,7 @@ class CLIAgentLLM(StatelessLLMInterface):
         launch_mode: str = "direct",
         interaction_mode: str = "character",
         session_id: str = "",
+        new_session_title: str = "",
         workspace_directory: str = ".",
         timeout: float = 300,
         show_reasoning: bool = False,
@@ -49,6 +50,7 @@ class CLIAgentLLM(StatelessLLMInterface):
         self.launch_mode = launch_mode
         self.interaction_mode = interaction_mode
         self.session_id = session_id
+        self.new_session_title = " ".join(new_session_title.split())
         self.workspace_directory = str(Path(workspace_directory).expanduser().resolve())
         self.timeout = timeout
         self.show_reasoning = show_reasoning
@@ -60,6 +62,26 @@ class CLIAgentLLM(StatelessLLMInterface):
         self.support_tools = False
         self._activity_inputs: Dict[str, tuple[str, dict]] = {}
         self._permission_bridge = PermissionBridge(runtime, self.permission_mode)
+
+    async def _apply_new_session_title(self) -> None:
+        if not self.session_id or not self.new_session_title:
+            return
+        from ...agent_runtime_sessions import rename_local_runtime_session
+
+        renamed = await asyncio.to_thread(
+            rename_local_runtime_session,
+            self.runtime,
+            self.session_id,
+            self.new_session_title,
+        )
+        if renamed:
+            self.new_session_title = ""
+            return
+        logger.warning(
+            "{} session {} was created but its requested title is not available yet",
+            self.runtime,
+            self.session_id,
+        )
 
     async def respond_to_permission(
         self,

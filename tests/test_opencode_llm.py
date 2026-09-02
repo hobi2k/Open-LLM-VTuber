@@ -418,6 +418,25 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(prompt["parts"][0]["text"], "Continue this session")
 
+    async def test_new_session_uses_requested_title(self):
+        llm = self._llm(new_session_title="  Project   launch  ")
+
+        chunks = [
+            chunk
+            async for chunk in llm.chat_completion(
+                [{"role": "user", "content": "Start this session"}]
+            )
+        ]
+
+        self.assertEqual("".join(chunks), "안녕하세요")
+        request = next(
+            body
+            for method, path, body in OpenCodeHandler.requests
+            if method == "POST" and path == "/session"
+        )
+        self.assertEqual(request["title"], "Project launch")
+        self.assertEqual(llm.new_session_title, "")
+
     async def test_uses_final_text_when_provider_sends_no_deltas(self):
         OpenCodeHandler.use_deltas = False
         chunks = [
@@ -664,6 +683,7 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
         interaction_mode="character",
         workspace_directory=".",
         session_id="",
+        new_session_title="",
     ):
         return OpenCodeLLM(
             base_url=f"http://127.0.0.1:{self.server.server_port}",
@@ -677,6 +697,7 @@ class OpenCodeLLMTest(unittest.IsolatedAsyncioTestCase):
             show_reasoning=show_reasoning,
             interaction_mode=interaction_mode,
             session_id=session_id,
+            new_session_title=new_session_title,
         )
 
 

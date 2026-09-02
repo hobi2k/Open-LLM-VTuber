@@ -118,6 +118,35 @@ class NativeAdapterFactoryTest(unittest.TestCase):
         self.assertIsInstance(self._create("hermes_cli_llm"), HermesACPLLM)
 
 
+class PendingSessionTitleTest(unittest.IsolatedAsyncioTestCase):
+    async def test_native_runtimes_apply_requested_title_to_original_session(self):
+        for runtime, adapter in (
+            ("claude_code", ClaudeAgentSDKLLM),
+            ("codex", CodexAppServerLLM),
+            ("hermes", HermesACPLLM),
+        ):
+            with self.subTest(runtime=runtime):
+                llm = adapter(
+                    runtime=runtime,
+                    executable="/usr/bin/true",
+                    workspace_directory=tempfile.gettempdir(),
+                    session_id=f"{runtime}-session",
+                    new_session_title="  Release   work  ",
+                )
+                with patch(
+                    "open_llm_vtuber.agent_runtime_sessions.rename_local_runtime_session",
+                    return_value=True,
+                ) as rename:
+                    await llm._apply_new_session_title()
+
+                rename.assert_called_once_with(
+                    runtime,
+                    f"{runtime}-session",
+                    "Release work",
+                )
+                self.assertEqual(llm.new_session_title, "")
+
+
 class NativeSessionResumeTest(unittest.IsolatedAsyncioTestCase):
     async def test_claude_resumes_selected_session_without_replaying_history(self):
         class Client:

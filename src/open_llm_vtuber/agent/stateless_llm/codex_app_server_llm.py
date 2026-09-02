@@ -126,6 +126,7 @@ class CodexAppServerLLM(CLIAgentLLM):
             if not isinstance(thread_id, str) or not thread_id:
                 raise RuntimeError("Codex app-server did not return a thread ID")
             self.session_id = thread_id
+            await self._apply_new_session_title()
             request_id += 1
 
             turn_params: dict[str, Any] = {

@@ -239,6 +239,7 @@ class HermesACPLLM(CLIAgentLLM):
                 if session is None:
                     raise RuntimeError("Hermes ACP could not open the selected session")
                 self.session_id = str(session.session_id)
+                await self._apply_new_session_title()
                 await self._configure_session(connection)
 
                 prompt_task = asyncio.create_task(

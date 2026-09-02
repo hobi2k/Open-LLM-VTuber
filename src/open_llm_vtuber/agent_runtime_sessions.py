@@ -47,7 +47,8 @@ async def rename_runtime_session(
         await _rename_opencode(context, request)
     elif request.runtime == "claude_code":
         renamed = await asyncio.to_thread(
-            _rename_claude_local,
+            rename_local_runtime_session,
+            request.runtime,
             request.session_id,
             request.title,
         )
@@ -55,7 +56,8 @@ async def rename_runtime_session(
             raise FileNotFoundError("Claude Code session not found")
     elif request.runtime == "codex":
         renamed = await asyncio.to_thread(
-            _rename_codex_local,
+            rename_local_runtime_session,
+            request.runtime,
             request.session_id,
             request.title,
         )
@@ -68,6 +70,19 @@ async def rename_runtime_session(
         "title": request.title,
         "runtime": request.runtime,
     }
+
+
+def rename_local_runtime_session(
+    runtime: Literal["claude_code", "codex", "hermes"],
+    session_id: str,
+    title: str,
+) -> bool:
+    rename = {
+        "claude_code": _rename_claude_local,
+        "codex": _rename_codex_local,
+        "hermes": _rename_hermes_local,
+    }[runtime]
+    return rename(session_id, title)
 
 
 async def _rename_opencode(
