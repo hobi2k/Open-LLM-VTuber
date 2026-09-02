@@ -37,6 +37,10 @@ from .agent_runtime_sessions import (
     SessionRenameRequest,
     rename_runtime_session,
 )
+from .agent_runtime_history import (
+    SessionHistoryRequest,
+    runtime_session_history_payload,
+)
 from .audio_settings import (
     TTSSettingsUpdate,
     apply_tts_settings,
@@ -143,6 +147,14 @@ def init_client_ws_route(default_context_cache: ServiceContext) -> APIRouter:
             raise HTTPException(status_code=404, detail=str(error)) from error
         except RuntimeError as error:
             raise HTTPException(status_code=502, detail=str(error)) from error
+
+    @router.post("/api/agent-runtime/session-history")
+    async def get_agent_runtime_session_history(
+        request: Request,
+        history: SessionHistoryRequest,
+    ):
+        require_local_request(request)
+        return await runtime_session_history_payload(default_context_cache, history)
 
     @router.get("/api/audio/settings")
     async def get_audio_settings(request: Request):
